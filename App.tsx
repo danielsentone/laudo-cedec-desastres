@@ -19,7 +19,10 @@ const App: React.FC = () => {
   const [editingEng, setEditingEng] = useState<Engenheiro | null>(null);
   const [showPreview, setShowPreview] = useState(false);
   const [isLoadingLocation, setIsLoadingLocation] = useState(false);
+  
+  // States para o Mapa
   const [mapSnapshot, setMapSnapshot] = useState<string | null>(null);
+  const [manualMapImage, setManualMapImage] = useState<string | null>(null); // Novo estado para upload manual
   const mapRef = useRef<any>(null);
   const markerRef = useRef<any>(null);
   
@@ -147,10 +150,11 @@ const App: React.FC = () => {
 
   useEffect(() => {
     if (!mapRef.current) {
-      mapRef.current = L.map('map-container').setView([parseFloat(formData.latitude), parseFloat(formData.longitude)], 16);
+      mapRef.current = L.map('map-container', {
+        preferCanvas: true // Tenta renderizar em Canvas para facilitar o print
+      }).setView([parseFloat(formData.latitude), parseFloat(formData.longitude)], 16);
       
-      // IMPORTANTE: Utilizando provedores que suportam CORS explicitamente (OpenStreetMap e Esri).
-      // O Google Maps (mt1.google.com) frequentemente bloqueia o acesso via Canvas (html2canvas) gerando erro de Tainted Canvas.
+      // IMPORTANTE: Utilizando provedores que suportam CORS explicitamente.
       const layers = {
         street: L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
           attribution: '&copy; OpenStreetMap contributors',
@@ -160,14 +164,13 @@ const App: React.FC = () => {
           attribution: 'Tiles &copy; Esri',
           crossOrigin: 'anonymous'
         }),
-        // Usando Esri Satélite como base robusta para o híbrido para garantir o print
         hybrid: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
             attribution: 'Tiles &copy; Esri',
             crossOrigin: 'anonymous'
         })
       };
 
-      // Inicializa com Híbrido (que agora é seguro para print)
+      // Inicializa com Híbrido
       layers[mapType].addTo(mapRef.current);
       
       markerRef.current = L.marker([parseFloat(formData.latitude), parseFloat(formData.longitude)], { draggable: true }).addTo(mapRef.current);
@@ -264,33 +267,43 @@ const App: React.FC = () => {
     }));
   };
 
+  const handleManualMapUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+        try {
+            const base64 = await fileToBase64(e.target.files[0]);
+            setManualMapImage(base64);
+        } catch (error) {
+            console.error("Erro ao carregar mapa manual", error);
+        }
+    }
+  };
+
   const handleTogglePreview = async () => {
     if (!showPreview) {
-        // Ao abrir o preview, tenta capturar a imagem do mapa atual
-        const mapElement = document.getElementById('map-container');
-        if (mapElement && (window as any).html2canvas) {
-            // Aumentando delay para 1s para garantir renderização dos tiles em mobile
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            
-            try {
-                // Tira um print do elemento do mapa
-                const canvas = await (window as any).html2canvas(mapElement, {
-                    useCORS: true, // ESSENCIAL: Permite carregar imagens de outros domínios
-                    allowTaint: false, // ESSENCIAL: Deve ser falso para permitir toDataURL
-                    proxy: null, // Desabilita proxy para evitar erros de requisição
-                    logging: true,
-                    scale: 2, // Mantém resolução alta
-                    backgroundColor: null,
-                    ignoreElements: (element: any) => {
-                        // Remove controles de zoom do print
-                        return element.classList.contains('leaflet-control-zoom');
-                    }
-                });
-                setMapSnapshot(canvas.toDataURL('image/png'));
-            } catch (error) {
-                console.error("Erro ao capturar imagem do mapa:", error);
-                // Mesmo com erro, permite abrir o preview (sem o mapa)
-                setMapSnapshot(null);
+        // Só tenta o snapshot automático se o usuário NÃO tiver enviado uma imagem manual
+        if (!manualMapImage) {
+            const mapElement = document.getElementById('map-container');
+            if (mapElement && (window as any).html2canvas) {
+                // Delay para garantir renderização
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                
+                try {
+                    const canvas = await (window as any).html2canvas(mapElement, {
+                        useCORS: true,
+                        allowTaint: false, 
+                        proxy: null,
+                        logging: true,
+                        scale: 2,
+                        backgroundColor: null,
+                        ignoreElements: (element: any) => {
+                            return element.classList.contains('leaflet-control-zoom');
+                        }
+                    });
+                    setMapSnapshot(canvas.toDataURL('image/png'));
+                } catch (error) {
+                    console.error("Erro ao capturar imagem do mapa:", error);
+                    setMapSnapshot(null);
+                }
             }
         }
     }
@@ -299,32 +312,26 @@ const App: React.FC = () => {
 
   const generatePDF = () => {
     const element = document.getElementById('laudo-pdf-content');
-    
-    // Sanitiza strings para evitar caracteres inválidos no nome do arquivo
     const safeText = (text: string) => text ? text.replace(/[\/\\:*?"<>|]/g, '').trim() : '';
-    
     const municipio = safeText(formData.municipio) || 'Municipio';
     const data = formData.data;
     const proprietario = safeText(formData.proprietario) || 'Proprietario';
-    
     const filename = `${municipio}_${data}_${proprietario}.pdf`;
 
-    // Configurações otimizadas para evitar páginas em branco e permitir múltiplas páginas
     const opt = {
-      margin: [10, 10, 10, 10], // Margem em mm (Top, Left, Bottom, Right)
+      margin: [10, 10, 10, 10], 
       filename: filename,
       image: { type: 'jpeg', quality: 0.98 },
       html2canvas: { 
-        scale: 2, // Melhora a qualidade
-        useCORS: true, // Permite carregar imagens externas se houver
+        scale: 2, 
+        useCORS: true, 
         letterRendering: true,
         scrollY: 0,
       },
       jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
-      pagebreak: { mode: ['avoid-all', 'css', 'legacy'] } // Evita cortes bruscos
+      pagebreak: { mode: ['avoid-all', 'css', 'legacy'] } 
     };
     
-    // Pequeno delay para garantir que o renderizador pegue o elemento visível
     html2pdf().set(opt).from(element).save();
   };
 
@@ -349,7 +356,6 @@ const App: React.FC = () => {
     <div className="bg-[#f2f2f2] min-h-screen font-sans">
       
       <div className="sticky top-0 z-30">
-        {/* Barra topo */}
         <div className="bg-[#1e1e1e] text-white py-1 px-4 flex justify-between items-center text-xs">
           <span className="font-bold">PR.GOV.BR</span>
           <div className="flex items-center gap-4">
@@ -357,7 +363,6 @@ const App: React.FC = () => {
           </div>
         </div>
 
-        {/* Header Principal */}
         <header className="bg-white shadow-md border-b-4 border-[#f38b00]">
           <div className="max-w-7xl mx-auto p-4 flex justify-between items-center">
               <div className="flex items-center gap-4">
@@ -646,7 +651,26 @@ const App: React.FC = () => {
                 </div>
                 
                 <div id="map-container" className="w-full h-80 bg-gray-200 rounded-lg overflow-hidden border-2 border-gray-300 shadow-inner z-10 relative"></div>
-                <p className="text-[10px] text-gray-400 italic">Arraste o marcador ou use o GPS para ajustar a localização exata.</p>
+                
+                {/* Opção de Upload Manual caso a captura automática falhe */}
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 mt-2 p-2 bg-orange-50 border border-orange-100 rounded">
+                     <p className="text-[10px] text-gray-500 italic">
+                       *Arraste o marcador no mapa para ajustar a localização exata.
+                     </p>
+                     <label className="text-[10px] bg-white border border-gray-300 text-blue-600 font-bold px-3 py-1 rounded cursor-pointer hover:bg-blue-50 hover:border-blue-300 flex items-center gap-2 shadow-sm whitespace-nowrap">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+                        </svg>
+                        {manualMapImage ? 'Imagem Anexada (Clique para alterar)' : 'Tirar Print e Anexar (Se o mapa automático falhar)'}
+                        <input type="file" accept="image/*" className="hidden" onChange={handleManualMapUpload} />
+                     </label>
+                </div>
+                {manualMapImage && (
+                    <div className="text-[10px] text-green-600 font-bold mt-1 text-right">
+                        ✓ Imagem manual carregada com sucesso. Ela substituirá o mapa automático no laudo.
+                    </div>
+                )}
               </div>
             </section>
 
@@ -769,7 +793,8 @@ const App: React.FC = () => {
         <div className="max-w-5xl mx-auto mb-20 px-4">
           <div className="bg-gray-300 p-4 md:p-8 rounded-lg overflow-x-auto shadow-inner border border-gray-400">
              <div className="inline-block min-w-[21cm] mx-auto bg-white shadow-2xl">
-                <LaudoPreview data={formData} engenheiro={currentEngenheiro} mapSnapshot={mapSnapshot} />
+                {/* Prioriza a imagem manual se existir, senão usa o snapshot automático */}
+                <LaudoPreview data={formData} engenheiro={currentEngenheiro} mapSnapshot={manualMapImage || mapSnapshot} />
              </div>
           </div>
         </div>
