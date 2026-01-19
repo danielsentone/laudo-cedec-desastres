@@ -150,6 +150,7 @@ const App: React.FC = () => {
       mapRef.current = L.map('map-container').setView([parseFloat(formData.latitude), parseFloat(formData.longitude)], 16);
       
       // IMPORTANTE: crossOrigin: true é necessário para o html2canvas conseguir capturar a imagem do mapa
+      // Google Maps atualizado para HTTPS (mt1) para evitar bloqueios de conteúdo misto e problemas de CORS
       const layers = {
         street: L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
           attribution: '&copy; OpenStreetMap contributors',
@@ -159,9 +160,8 @@ const App: React.FC = () => {
           attribution: 'Esri &copy; Source: Esri, i-cubed, USDA, USGS',
           crossOrigin: true
         }),
-        hybrid: L.tileLayer('http://{s}.google.com/vt/lyrs=s,h&x={x}&y={y}&z={z}',{
+        hybrid: L.tileLayer('https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',{
             maxZoom: 20,
-            subdomains:['mt0','mt1','mt2','mt3'],
             attribution: 'Map data &copy;2024 Google',
             crossOrigin: true
         })
@@ -269,15 +269,23 @@ const App: React.FC = () => {
         // Ao abrir o preview, tenta capturar a imagem do mapa atual
         const mapElement = document.getElementById('map-container');
         if (mapElement && (window as any).html2canvas) {
+            // Pequeno delay para garantir que os tiles do mapa foram renderizados após qualquer movimento
+            await new Promise(resolve => setTimeout(resolve, 800));
+            
             try {
                 // Tira um print do elemento do mapa
                 const canvas = await (window as any).html2canvas(mapElement, {
-                    useCORS: true,
-                    allowTaint: true,
+                    useCORS: true, // ESSENCIAL: Permite carregar imagens de outros domínios
+                    allowTaint: false, // ESSENCIAL: Deve ser falso para permitir toDataURL
                     logging: false,
-                    scale: 1 // Mantém resolução original para performance
+                    scale: 2, // Mantém resolução alta
+                    backgroundColor: null,
+                    ignoreElements: (element: any) => {
+                        // Remove controles de zoom do print
+                        return element.classList.contains('leaflet-control-zoom');
+                    }
                 });
-                setMapSnapshot(canvas.toDataURL('image/jpeg', 0.8));
+                setMapSnapshot(canvas.toDataURL('image/png'));
             } catch (error) {
                 console.error("Erro ao capturar imagem do mapa:", error);
                 setMapSnapshot(null);
