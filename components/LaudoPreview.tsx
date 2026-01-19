@@ -3,6 +3,7 @@ import React from 'react';
 import { LaudoData } from '../types';
 import { Engenheiro } from '../constants';
 import { getNivelDestruicao, getPercentualDestruicao } from '../utils';
+import { LOGO_DEFESA_CIVIL_BASE64, LOGO_PARANA_BASE64 } from '../assets';
 
 interface Props {
   data: LaudoData;
@@ -10,86 +11,133 @@ interface Props {
 }
 
 const LaudoPreview: React.FC<Props> = ({ data, engenheiro }) => {
-  const mapUrl = `https://maps.googleapis.com/maps/api/staticmap?center=${data.latitude},${data.longitude}&zoom=18&size=800x400&maptype=satellite&markers=color:blue%7Clabel:S%7C${data.latitude},${data.longitude}`;
-
+  // URL para mapa estático (simulado para este ambiente, idealmente seria uma API Key real)
+  const mapUrl = `https://maps.googleapis.com/maps/api/staticmap?center=${data.latitude},${data.longitude}&zoom=18&size=600x300&maptype=hybrid&markers=color:red%7Clabel:A%7C${data.latitude},${data.longitude}&key=YOUR_API_KEY_HERE_IF_NEEDED`; 
+  // Nota: Sem API Key do Google, isso pode falhar em produção real, mas a lógica está correta. 
+  // Para visualização local sem chave, podemos usar um placeholder ou o container do Leaflet se fosse renderização direta, 
+  // mas para PDF estático, uma imagem é necessária. Vou usar um placeholder visual se a imagem falhar ou para demonstração.
+  
   return (
-    <div id="laudo-pdf-content" className="bg-white p-8 font-serif text-sm max-w-[21cm] mx-auto text-gray-900 border border-gray-200">
+    <div id="laudo-pdf-content" className="bg-white p-12 font-sans text-xs text-gray-900 w-full max-w-[21cm] min-h-[29.7cm] relative">
+      {/* Background Pattern Simples para simular papel timbrado se necessário, ou branco limpo */}
+      
       {/* HEADER */}
-      <div className="flex justify-between items-start mb-6 border-b-2 border-blue-800 pb-4">
-        <div className="flex gap-4 items-center">
-            <img src="https://www.governodigital.pr.gov.br/sites/governo-digital/files/styles/extra_large/public/imagem/2021-03/logo_governo_pr.png?itok=39S9I5xL" alt="Governo PR" className="h-16" />
-            <div className="text-center font-bold">
-                <p>ESTADO DO PARANÁ</p>
-                <p>COORDENADORIA ESTADUAL DA DEFESA CIVIL</p>
-                <p>FUNDO ESTADUAL PARA CALAMIDADES PÚBLICAS</p>
+      <div className="flex justify-between items-start mb-8 border-b-2 border-gray-800 pb-6">
+        <div className="flex items-center gap-4">
+            {/* Logo Paraná */}
+            <img src={LOGO_PARANA_BASE64} alt="Brasão PR" className="h-20" />
+            <div className="text-center">
+                <h2 className="font-bold text-sm uppercase">Estado do Paraná</h2>
+                <h3 className="font-bold text-xs uppercase">Coordenadoria Estadual da Defesa Civil</h3>
+                <p className="text-[10px] uppercase">Fundo Estadual para Calamidades Públicas</p>
             </div>
         </div>
-        <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/1/14/Símbolo_Internacional_da_Proteção_Civil.svg/1200px-Símbolo_Internacional_da_Proteção_Civil.svg.png" alt="Defesa Civil" className="h-16" />
+        {/* Logo Defesa Civil */}
+        <img src={LOGO_DEFESA_CIVIL_BASE64} alt="Defesa Civil" className="h-16" />
       </div>
 
-      <h1 className="text-center text-xl font-bold mb-8 uppercase tracking-widest">Laudo de Imóvel Afetado por Evento Climático</h1>
-
-      <div className="space-y-4 mb-8">
-        <p><span className="font-bold">MUNICÍPIO:</span> <span className="bg-yellow-200 px-1">{data.municipio}</span></p>
-        <p><span className="font-bold">DATA:</span> <span className="bg-yellow-200 px-1">{new Date(data.data).toLocaleDateString('pt-BR')}</span></p>
+      {/* TITULO */}
+      <div className="text-center mb-10">
+        <h1 className="text-xl font-black uppercase tracking-wider underline">Laudo de Imóvel Afetado por Evento Climático</h1>
       </div>
 
-      <div className="border-t border-gray-300 pt-4">
-        <h2 className="font-bold text-center mb-4 uppercase">Informações do Imóvel</h2>
-        <div className="grid grid-cols-1 gap-3">
-            <p><span className="font-bold">INSCRIÇÃO MUNICIPAL:</span> <span className="bg-yellow-200 px-1">{data.inscricaoMunicipal}</span></p>
-            <p><span className="font-bold">PROPRIETÁRIO:</span> <span className="bg-yellow-200 px-1">{data.proprietario}</span></p>
-            <p><span className="font-bold">REQUERENTE:</span> <span className="bg-yellow-200 px-1">{data.requerente}</span></p>
-            <p><span className="font-bold">ENDEREÇO:</span> <span className="bg-yellow-200 px-1">{data.endereco}</span></p>
-            <p><span className="font-bold">COORDENADAS:</span> <span className="bg-yellow-200 px-1">{data.latitude}, {data.longitude}</span></p>
-            
-            <div className="my-4 flex justify-center border p-2 bg-gray-50">
-              <img src={mapUrl} alt="Mapa Satélite" className="max-w-full h-auto rounded shadow-sm" />
+      {/* DADOS GERAIS */}
+      <div className="mb-6 grid grid-cols-2 gap-4">
+        <div>
+            <span className="font-bold uppercase">Município:</span> <span className="uppercase ml-2 border-b border-dotted border-gray-400">{data.municipio}</span>
+        </div>
+        <div className="text-right">
+            <span className="font-bold uppercase">Data:</span> <span className="uppercase ml-2 border-b border-dotted border-gray-400">{new Date(data.data).toLocaleDateString('pt-BR')}</span>
+        </div>
+      </div>
+
+      {/* INFORMAÇÕES DO IMÓVEL */}
+      <div className="mb-8">
+        <h2 className="font-bold uppercase text-sm mb-4 border-b border-gray-300 pb-1">Informações do Imóvel</h2>
+        <div className="space-y-3 pl-2">
+            <div className="grid grid-cols-1">
+                <p><span className="font-bold uppercase w-40 inline-block">Inscrição Municipal:</span> {data.inscricaoMunicipal || 'N/A'}</p>
             </div>
-
-            <p><span className="font-bold">TIPOLOGIA:</span> <span className="bg-yellow-200 px-1">{data.tipologia === 'Outro' ? data.tipologiaOutro : data.tipologia}</span></p>
-        </div>
-      </div>
-
-      <div className="page-break-before mt-12 pt-8 border-t-2 border-gray-100">
-        <h2 className="font-bold text-center mb-6 uppercase">Levantamento de Danos</h2>
-        <div className="space-y-8">
-          {data.levantamentoDanos.map((dano, index) => (
-            <div key={index} className="space-y-4">
-              <p className="text-justify">
-                <span className="font-bold uppercase">{dano.tipo}:</span> <span className="bg-yellow-200 px-1 leading-relaxed">{dano.descricao}</span>
-              </p>
-              <div className="grid grid-cols-2 gap-4">
-                {dano.fotos.map((foto, fIdx) => (
-                  <img key={fIdx} src={foto} alt={`Foto dano ${dano.tipo}`} className="w-full h-48 object-cover rounded border shadow-sm" />
-                ))}
-              </div>
+            <div className="grid grid-cols-1">
+                <p><span className="font-bold uppercase w-40 inline-block">Proprietário:</span> {data.proprietario}</p>
             </div>
-          ))}
+            <div className="grid grid-cols-1">
+                <p><span className="font-bold uppercase w-40 inline-block">Requerente:</span> {data.requerente}</p>
+            </div>
+            <div className="grid grid-cols-1">
+                <p><span className="font-bold uppercase w-40 inline-block">Endereço:</span> {data.endereco}</p>
+            </div>
+            <div className="grid grid-cols-1">
+                <p><span className="font-bold uppercase w-40 inline-block">Coordenadas:</span> {data.latitude}, {data.longitude}</p>
+            </div>
+            <div className="grid grid-cols-1">
+                <p><span className="font-bold uppercase w-40 inline-block">Tipologia:</span> {data.tipologia === 'Outro' ? data.tipologiaOutro : data.tipologia}</p>
+            </div>
         </div>
       </div>
 
-      <div className="mt-12 border-t pt-6">
-        <h2 className="font-bold text-center mb-4 uppercase">Ações do Evento Climático</h2>
-        <div className="space-y-3">
-          <p><span className="font-bold uppercase">Classificação:</span> <span className="bg-yellow-200 px-1">{data.classificacaoDanos}</span></p>
-          <p><span className="font-bold uppercase">Nível de Destruição:</span> <span className="bg-yellow-200 px-1">{getNivelDestruicao(data.classificacaoDanos)}</span></p>
-          <p><span className="font-bold uppercase">Percentual Considerado de Destruição:</span> <span className="bg-yellow-200 px-1">{getPercentualDestruicao(data.classificacaoDanos)}</span></p>
+      {/* MAPA */}
+      <div className="mb-8 border-2 border-gray-300 p-1 flex justify-center items-center bg-gray-100 min-h-[200px]">
+         {/* Simulando a imagem do mapa. Em produção real, use a imagem gerada ou capture o canvas */}
+         <div className="text-center text-gray-400">
+            <p className="font-bold mb-2">LOCALIZAÇÃO GEORREFERENCIADA</p>
+            <div className="w-full h-64 bg-gray-200 flex items-center justify-center relative overflow-hidden">
+                {/* Fallback visual para o PDF */}
+                <div className="absolute inset-0 flex items-center justify-center opacity-20 text-6xl">🗺️</div>
+                <div className="z-10 bg-white p-2 rounded shadow text-xs">
+                    Lat: {data.latitude}<br/>Lon: {data.longitude}
+                </div>
+            </div>
+         </div>
+      </div>
+
+      {/* DANOS */}
+      <div className="mb-8 page-break-inside-avoid">
+        <h2 className="font-bold uppercase text-sm mb-4 border-b border-gray-300 pb-1">Levantamento de Danos</h2>
+        <div className="space-y-6">
+            {data.levantamentoDanos.length === 0 && <p className="italic text-gray-500">Nenhum dano registrado.</p>}
+            {data.levantamentoDanos.map((dano, idx) => (
+                <div key={idx} className="mb-4">
+                    <p className="mb-2 text-justify">
+                        <span className="font-bold uppercase text-red-700 mr-2">[{dano.tipo}]:</span> 
+                        {dano.descricao}
+                    </p>
+                    {dano.fotos.length > 0 && (
+                        <div className="grid grid-cols-2 gap-2 mt-2">
+                            {dano.fotos.map((foto, fIdx) => (
+                                <img key={fIdx} src={foto} className="w-full h-40 object-cover border border-gray-200" alt={`Dano ${dano.tipo}`} />
+                            ))}
+                        </div>
+                    )}
+                </div>
+            ))}
         </div>
       </div>
 
-      <div className="mt-20 text-center flex flex-col items-center">
-        <div className="w-64 border-t border-black mb-1"></div>
-        <p className="font-bold uppercase text-lg">{engenheiro?.nome || '---'}</p>
-        <p>Engenheiro Civil</p>
-        <p>CREA <span className="bg-yellow-200 px-1">{engenheiro?.creaEstado} {engenheiro?.creaNumero}</span></p>
+      {/* AÇÕES / CLASSIFICAÇÃO */}
+      <div className="mb-12 border-t-2 border-gray-800 pt-6 page-break-inside-avoid">
+        <h2 className="font-bold uppercase text-center text-base mb-6">Classificação e Parecer Técnico</h2>
+        <div className="grid grid-cols-1 gap-2 text-sm pl-4">
+            <p><span className="font-bold uppercase w-64 inline-block">Classificação do Dano:</span> {data.classificacaoDanos}</p>
+            <p><span className="font-bold uppercase w-64 inline-block">Nível de Destruição:</span> {getNivelDestruicao(data.classificacaoDanos)}</p>
+            <p><span className="font-bold uppercase w-64 inline-block">Percentual Estimado:</span> {getPercentualDestruicao(data.classificacaoDanos)}</p>
+        </div>
       </div>
 
-      <footer className="mt-12 pt-4 border-t border-gray-200 text-[10px] text-center text-gray-500">
+      {/* ASSINATURA */}
+      <div className="mt-16 flex flex-col items-center justify-center page-break-inside-avoid">
+        <div className="w-80 border-t border-black mb-2"></div>
+        <p className="font-bold uppercase text-sm">{engenheiro?.nome || '__________________________'}</p>
+        <p className="uppercase text-xs">Engenheiro Civil</p>
+        <p className="text-xs">CREA: {engenheiro?.creaEstado} {engenheiro?.creaNumero || '__________'}</p>
+      </div>
+
+      {/* RODAPÉ */}
+      <div className="absolute bottom-8 left-12 right-12 text-center text-[10px] text-gray-500 border-t border-gray-200 pt-2">
         <p>Palácio das Araucárias - 1º andar - Setor C | Centro Cívico | Curitiba/PR | CEP 80.530-140</p>
         <p>E-mail: defesacivil@defesacivil.pr.gov.br | Fone: (41) 3281-2500</p>
-        <p className="mt-2 font-bold italic text-gray-700">"Defesa Civil somos todos nós"</p>
-      </footer>
+        <p className="mt-1 font-bold italic">"Defesa Civil somos todos nós"</p>
+      </div>
     </div>
   );
 };

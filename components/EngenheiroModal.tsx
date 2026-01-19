@@ -13,7 +13,7 @@ const EngenheiroModal: React.FC<Props> = ({ isOpen, onClose, onSave, initialData
   const [formData, setFormData] = useState<Engenheiro>({
     id: '',
     nome: '',
-    creaEstado: 'PR',
+    creaEstado: '',
     creaNumero: '',
     endereco: '',
     telefone: ''
@@ -26,7 +26,7 @@ const EngenheiroModal: React.FC<Props> = ({ isOpen, onClose, onSave, initialData
       setFormData({
         id: Math.random().toString(36).substr(2, 9),
         nome: '',
-        creaEstado: 'PR',
+        creaEstado: '',
         creaNumero: '',
         endereco: '',
         telefone: ''
@@ -39,7 +39,7 @@ const EngenheiroModal: React.FC<Props> = ({ isOpen, onClose, onSave, initialData
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-xl p-6 w-full max-w-md shadow-2xl">
-        <h2 className="text-xl font-bold mb-4 text-blue-900">
+        <h2 className="text-xl font-bold mb-4 text-[#f38b00]">
           {initialData ? 'Editar Engenheiro' : 'Cadastrar Engenheiro'}
         </h2>
         
@@ -48,7 +48,7 @@ const EngenheiroModal: React.FC<Props> = ({ isOpen, onClose, onSave, initialData
             <label className="block text-sm font-medium text-gray-700">Nome Completo</label>
             <input
               type="text"
-              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border focus:ring-blue-500 focus:border-blue-500"
+              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border focus:ring-[#f38b00] focus:border-[#f38b00]"
               value={formData.nome}
               onChange={e => setFormData({...formData, nome: e.target.value})}
             />
@@ -58,10 +58,11 @@ const EngenheiroModal: React.FC<Props> = ({ isOpen, onClose, onSave, initialData
             <div className="col-span-1">
               <label className="block text-sm font-medium text-gray-700">CREA UF</label>
               <select
-                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border focus:ring-blue-500 focus:border-blue-500"
+                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border focus:ring-[#f38b00] focus:border-[#f38b00]"
                 value={formData.creaEstado}
                 onChange={e => setFormData({...formData, creaEstado: e.target.value})}
               >
+                <option value="" disabled>Selecionar...</option>
                 {ESTADOS_BR.map(uf => <option key={uf} value={uf}>{uf}</option>)}
               </select>
             </div>
@@ -70,7 +71,7 @@ const EngenheiroModal: React.FC<Props> = ({ isOpen, onClose, onSave, initialData
               <input
                 type="text"
                 placeholder="Ex: 123.456/D"
-                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border focus:ring-blue-500 focus:border-blue-500"
+                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border focus:ring-[#f38b00] focus:border-[#f38b00]"
                 value={formData.creaNumero}
                 onChange={e => setFormData({...formData, creaNumero: e.target.value})}
               />
@@ -81,7 +82,7 @@ const EngenheiroModal: React.FC<Props> = ({ isOpen, onClose, onSave, initialData
             <label className="block text-sm font-medium text-gray-700">Endereço Profissional</label>
             <input
               type="text"
-              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border focus:ring-blue-500 focus:border-blue-500"
+              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border focus:ring-[#f38b00] focus:border-[#f38b00]"
               value={formData.endereco}
               onChange={e => setFormData({...formData, endereco: e.target.value})}
             />
@@ -91,7 +92,7 @@ const EngenheiroModal: React.FC<Props> = ({ isOpen, onClose, onSave, initialData
             <label className="block text-sm font-medium text-gray-700">Telefone</label>
             <input
               type="text"
-              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border focus:ring-blue-500 focus:border-blue-500"
+              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border focus:ring-[#f38b00] focus:border-[#f38b00]"
               value={formData.telefone}
               onChange={e => setFormData({...formData, telefone: e.target.value})}
             />
@@ -107,7 +108,7 @@ const EngenheiroModal: React.FC<Props> = ({ isOpen, onClose, onSave, initialData
           </button>
           <button
             onClick={() => onSave(formData)}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 shadow-md transition"
+            className="px-4 py-2 bg-[#f38b00] text-white rounded-lg hover:bg-orange-600 shadow-md transition font-bold"
           >
             Salvar
           </button>

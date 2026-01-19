@@ -1,10 +1,11 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { MUNICIPIOS_PR, TIPOLOGIAS, ITENS_DANOS, CLASSIFICACOES, ENGENHEIROS_INICIAIS, Engenheiro } from './constants';
-import { LaudoData, DanoInfo } from './types';
+import { LaudoData } from './types';
 import { getNivelDestruicao, getPercentualDestruicao, fileToBase64 } from './utils';
 import EngenheiroModal from './components/EngenheiroModal';
 import LaudoPreview from './components/LaudoPreview';
+import { LOGO_DEFESA_CIVIL_BASE64 } from './assets';
 
 // @ts-ignore
 const html2pdf = window.html2pdf;
@@ -21,22 +22,22 @@ const App: React.FC = () => {
   
   const [formData, setFormData] = useState<LaudoData>({
     id: Date.now(),
-    municipio: 'Curitiba',
+    municipio: '',
     data: new Date().toISOString().split('T')[0],
-    engenheiroId: '1',
+    engenheiroId: '',
     inscricaoMunicipal: '',
     proprietario: '',
     requerente: '',
     endereco: '',
     latitude: '-25.4290',
     longitude: '-49.2671',
-    tipologia: 'Casa de Alvenaria',
+    tipologia: '',
     tipologiaOutro: '',
     levantamentoDanos: [],
-    classificacaoDanos: 'Danos Mínimos'
+    classificacaoDanos: ''
   });
 
-  const [mapType, setMapType] = useState<'satellite' | 'street'>('satellite');
+  const [mapType, setMapType] = useState<'satellite' | 'street' | 'hybrid'>('hybrid');
 
   // Função para buscar endereço a partir de coordenadas (Reverse Geocoding)
   const fetchAddressFromCoords = async (lat: number, lng: number) => {
@@ -68,10 +69,17 @@ const App: React.FC = () => {
         }),
         satellite: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
           attribution: 'Esri &copy; Source: Esri, i-cubed, USDA, USGS'
+        }),
+        hybrid: L.tileLayer('http://{s}.google.com/vt/lyrs=s,h&x={x}&y={y}&z={z}',{
+            maxZoom: 20,
+            subdomains:['mt0','mt1','mt2','mt3'],
+            attribution: 'Map data &copy;2024 Google'
         })
       };
 
+      // Inicializa com Híbrido
       layers[mapType].addTo(mapRef.current);
+      
       markerRef.current = L.marker([formData.latitude, formData.longitude], { draggable: true }).addTo(mapRef.current);
 
       markerRef.current.on('dragend', (e: any) => {
@@ -104,6 +112,7 @@ const App: React.FC = () => {
   useEffect(() => {
     const fetchCityCoords = async () => {
       try {
+        if (!formData.municipio) return;
         const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(formData.municipio + ', PR, Brasil')}&limit=1`);
         const data = await response.json();
         if (data && data.length > 0) {
@@ -168,7 +177,7 @@ const App: React.FC = () => {
   const generatePDF = () => {
     const element = document.getElementById('laudo-pdf-content');
     const opt = {
-      margin: 10,
+      margin: 5,
       filename: `laudo-defesacivil-${formData.id}.pdf`,
       image: { type: 'jpeg', quality: 0.98 },
       html2canvas: { scale: 2, useCORS: true },
@@ -195,60 +204,66 @@ const App: React.FC = () => {
   const currentEngenheiro = engenheiros.find(e => e.id === formData.engenheiroId);
 
   return (
-    <div className="bg-[#f2f2f2] min-h-screen">
-      <div className="bg-[#1e2b58] text-white py-2 px-4 flex justify-between items-center text-xs font-bold uppercase tracking-wider">
-        <div className="flex items-center gap-2">
-          <span>PR.GOV.BR</span>
-        </div>
-        <div className="flex items-center gap-4">
-          <span>Governo do Paraná</span>
-          <div className="flex gap-2">
-            <span className="w-4 h-4 rounded-full bg-white/20"></span>
-            <span className="w-4 h-4 rounded-full bg-white/20"></span>
+    <div className="bg-[#f2f2f2] min-h-screen font-sans">
+      
+      <div className="sticky top-0 z-30">
+        {/* Barra topo */}
+        <div className="bg-[#1e1e1e] text-white py-1 px-4 flex justify-between items-center text-xs">
+          <span className="font-bold">PR.GOV.BR</span>
+          <div className="flex items-center gap-4">
+            <span className="font-semibold hidden sm:inline uppercase">Governo do Estado do Paraná</span>
           </div>
         </div>
-      </div>
 
-      <header className="bg-white shadow-md border-b-4 border-[#f38b00]">
-        <div className="max-w-6xl mx-auto p-4 flex flex-col md:flex-row items-center gap-6">
-          <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/1/14/Símbolo_Internacional_da_Proteção_Civil.svg/1200px-Símbolo_Internacional_da_Proteção_Civil.svg.png" 
-               alt="Defesa Civil PR" className="h-20" />
-          <div className="text-center md:text-left flex-1 border-l-0 md:border-l-2 md:pl-6 border-gray-200">
-            <h1 className="text-xl md:text-2xl font-black text-[#1e2b58] uppercase">Coordenadoria Estadual da Defesa Civil</h1>
-            <p className="text-[#f38b00] font-bold text-sm md:text-base">Sistema de Composição de Laudos Técnicos</p>
+        {/* Header Principal */}
+        <header className="bg-white shadow-md border-b-4 border-[#f38b00]">
+          <div className="max-w-7xl mx-auto p-4 flex justify-between items-center">
+              <div className="flex items-center gap-4">
+                  <img 
+                      src={LOGO_DEFESA_CIVIL_BASE64}
+                      alt="Defesa Civil Paraná" 
+                      className="h-14" 
+                  />
+                  <div className="hidden md:flex flex-col">
+                    <span className="text-[#f38b00] font-black uppercase text-sm leading-tight">
+                        Defesa Civil
+                    </span>
+                    <span className="text-gray-500 font-semibold uppercase text-xs">
+                        Coordenadoria Estadual
+                    </span>
+                  </div>
+              </div>
+              <div className="text-right">
+                 <h1 className="text-lg md:text-xl font-black text-gray-700 uppercase">
+                    Laudo Técnico
+                 </h1>
+                 <p className="text-xs text-gray-400">Sistema de Gestão de Desastres</p>
+              </div>
           </div>
-          <div className="hidden lg:block">
-            <img src="https://www.governodigital.pr.gov.br/sites/governo-digital/files/styles/extra_large/public/imagem/2021-03/logo_governo_pr.png?itok=39S9I5xL" 
-                 alt="Governo PR" className="h-16" />
-          </div>
-        </div>
-      </header>
-
-      <div className="bg-[#f38b00] py-2 shadow-inner">
-        <div className="max-w-6xl mx-auto px-4 flex gap-4 overflow-x-auto no-scrollbar">
-          <span className="bg-white/20 text-white px-3 py-1 rounded-full text-xs font-bold uppercase cursor-default whitespace-nowrap">Novo Laudo</span>
-          <span className="text-white/80 px-3 py-1 rounded-full text-xs font-bold uppercase hover:bg-white/10 cursor-pointer whitespace-nowrap">Consultar</span>
-          <span className="text-white/80 px-3 py-1 rounded-full text-xs font-bold uppercase hover:bg-white/10 cursor-pointer whitespace-nowrap">Estatísticas</span>
-        </div>
+        </header>
       </div>
 
       <main className="max-w-5xl mx-auto py-8 px-4">
+        
         <div className="bg-white rounded-lg shadow-xl overflow-hidden border border-gray-200">
           <div className="p-6 md:p-10 space-y-10">
+            
+            {/* Seção 1 */}
             <section className="space-y-6">
-              <div className="flex items-center gap-3">
-                <span className="bg-[#1e2b58] text-white px-3 py-1 rounded text-sm font-bold">01</span>
-                <h2 className="text-lg font-black text-[#1e2b58] uppercase">Informações da Inspeção</h2>
+              <div className="flex items-center gap-3 border-b border-gray-100 pb-2">
+                <span className="bg-[#f38b00] text-white w-8 h-8 flex items-center justify-center rounded-full font-bold">1</span>
+                <h2 className="text-lg font-black text-gray-700 uppercase">Informações da Inspeção</h2>
               </div>
               
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="space-y-1">
                   <label className="block text-xs font-bold text-gray-500 uppercase">Município do Paraná</label>
                   <select
-                    className="w-full rounded border-gray-300 bg-white text-gray-900 shadow-sm focus:ring-[#1e2b58] focus:border-[#1e2b58] p-3 text-sm font-semibold border-2"
+                    className="w-full rounded border-gray-300 bg-white text-gray-900 shadow-sm focus:ring-[#f38b00] focus:border-[#f38b00] p-3 text-sm font-semibold border-2"
                     value={formData.municipio}
                     onChange={e => setFormData({ ...formData, municipio: e.target.value })}
                   >
+                    <option value="" disabled>Selecionar...</option>
                     {MUNICIPIOS_PR.map(m => <option key={m} value={m}>{m}</option>)}
                   </select>
                 </div>
@@ -256,29 +271,30 @@ const App: React.FC = () => {
                   <label className="block text-xs font-bold text-gray-500 uppercase">Data do Levantamento</label>
                   <input
                     type="date"
-                    className="w-full rounded border-gray-300 bg-white text-gray-900 shadow-sm focus:ring-[#1e2b58] focus:border-[#1e2b58] p-3 text-sm font-semibold border-2"
+                    readOnly
+                    className="w-full rounded border-gray-300 bg-gray-100 text-gray-500 cursor-not-allowed shadow-sm p-3 text-sm font-semibold border-2"
                     value={formData.data}
-                    onChange={e => setFormData({ ...formData, data: e.target.value })}
                   />
                 </div>
               </div>
 
-              <div className="bg-[#f8f9fa] p-4 rounded-lg border-2 border-dashed border-gray-200">
+              <div className="bg-orange-50 p-4 rounded-lg border-2 border-dashed border-orange-200">
                 <div className="flex items-center justify-between mb-3">
-                  <label className="block text-xs font-bold text-[#1e2b58] uppercase">Engenheiro Responsável</label>
+                  <label className="block text-xs font-bold text-[#f38b00] uppercase">Engenheiro Responsável</label>
                   <button 
                     onClick={() => { setEditingEng(null); setIsEngModalOpen(true); }}
-                    className="text-[10px] bg-[#1e2b58] text-white px-2 py-1 rounded hover:bg-[#2a3c7a] transition"
+                    className="text-[10px] bg-[#f38b00] text-white px-3 py-1 rounded-full hover:bg-orange-600 transition uppercase font-bold"
                   >
-                    + CADASTRAR NOVO
+                    + Novo
                   </button>
                 </div>
                 <div className="flex gap-2">
                   <select
-                    className="flex-1 rounded border-gray-300 bg-white text-gray-900 shadow-sm p-3 text-sm font-bold border-2"
+                    className="flex-1 rounded border-gray-300 bg-white text-gray-900 shadow-sm p-3 text-sm font-bold border-2 focus:border-[#f38b00] focus:ring-[#f38b00]"
                     value={formData.engenheiroId}
                     onChange={e => setFormData({ ...formData, engenheiroId: e.target.value })}
                   >
+                    <option value="" disabled>Selecionar...</option>
                     {engenheiros.map(eng => (
                       <option key={eng.id} value={eng.id}>
                         {eng.nome} - CREA {eng.creaEstado} {eng.creaNumero}
@@ -286,8 +302,9 @@ const App: React.FC = () => {
                     ))}
                   </select>
                   <button 
-                    onClick={() => { setEditingEng(currentEngenheiro!); setIsEngModalOpen(true); }}
-                    className="px-4 py-2 bg-gray-200 text-gray-700 rounded text-xs font-bold hover:bg-gray-300 border border-gray-300"
+                    onClick={() => { if(currentEngenheiro) { setEditingEng(currentEngenheiro); setIsEngModalOpen(true); } }}
+                    disabled={!currentEngenheiro}
+                    className="px-4 py-2 bg-white text-gray-700 rounded text-xs font-bold hover:bg-gray-50 border-2 border-gray-300 disabled:opacity-50"
                   >
                     EDITAR
                   </button>
@@ -295,10 +312,11 @@ const App: React.FC = () => {
               </div>
             </section>
 
+            {/* Seção 2 */}
             <section className="space-y-6">
-              <div className="flex items-center gap-3">
-                <span className="bg-[#1e2b58] text-white px-3 py-1 rounded text-sm font-bold">02</span>
-                <h2 className="text-lg font-black text-[#1e2b58] uppercase">Identificação do Imóvel</h2>
+              <div className="flex items-center gap-3 border-b border-gray-100 pb-2">
+                <span className="bg-[#f38b00] text-white w-8 h-8 flex items-center justify-center rounded-full font-bold">2</span>
+                <h2 className="text-lg font-black text-gray-700 uppercase">Identificação do Imóvel</h2>
               </div>
               
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -306,7 +324,7 @@ const App: React.FC = () => {
                   <label className="block text-xs font-bold text-gray-500 uppercase">Inscrição Municipal</label>
                   <input
                     type="text"
-                    className="w-full rounded border-gray-300 bg-white text-gray-900 shadow-sm focus:ring-[#1e2b58] p-3 text-sm font-semibold border-2"
+                    className="w-full rounded border-gray-300 bg-white text-gray-900 shadow-sm focus:ring-[#f38b00] focus:border-[#f38b00] p-3 text-sm font-semibold border-2"
                     value={formData.inscricaoMunicipal}
                     onChange={e => setFormData({ ...formData, inscricaoMunicipal: e.target.value })}
                   />
@@ -315,7 +333,7 @@ const App: React.FC = () => {
                   <label className="block text-xs font-bold text-gray-500 uppercase">Proprietário</label>
                   <input
                     type="text"
-                    className="w-full rounded border-gray-300 bg-white text-gray-900 shadow-sm focus:ring-[#1e2b58] p-3 text-sm font-semibold border-2"
+                    className="w-full rounded border-gray-300 bg-white text-gray-900 shadow-sm focus:ring-[#f38b00] focus:border-[#f38b00] p-3 text-sm font-semibold border-2"
                     value={formData.proprietario}
                     onChange={e => setFormData({ ...formData, proprietario: e.target.value })}
                   />
@@ -324,7 +342,7 @@ const App: React.FC = () => {
                   <label className="block text-xs font-bold text-gray-500 uppercase">Requerente</label>
                   <input
                     type="text"
-                    className="w-full rounded border-gray-300 bg-white text-gray-900 shadow-sm focus:ring-[#1e2b58] p-3 text-sm font-semibold border-2"
+                    className="w-full rounded border-gray-300 bg-white text-gray-900 shadow-sm focus:ring-[#f38b00] focus:border-[#f38b00] p-3 text-sm font-semibold border-2"
                     value={formData.requerente}
                     onChange={e => setFormData({ ...formData, requerente: e.target.value })}
                   />
@@ -332,10 +350,11 @@ const App: React.FC = () => {
                 <div className="space-y-1">
                   <label className="block text-xs font-bold text-gray-500 uppercase">Tipologia da Edificação</label>
                   <select
-                    className="w-full rounded border-gray-300 bg-white text-gray-900 shadow-sm p-3 text-sm font-semibold border-2"
+                    className="w-full rounded border-gray-300 bg-white text-gray-900 shadow-sm focus:ring-[#f38b00] focus:border-[#f38b00] p-3 text-sm font-semibold border-2"
                     value={formData.tipologia}
                     onChange={e => setFormData({ ...formData, tipologia: e.target.value })}
                   >
+                    <option value="" disabled>Selecionar...</option>
                     {TIPOLOGIAS.map(t => <option key={t} value={t}>{t}</option>)}
                   </select>
                   {formData.tipologia === 'Outro' && (
@@ -351,13 +370,27 @@ const App: React.FC = () => {
               </div>
 
               <div className="space-y-4 pt-4 border-t border-gray-100">
-                <label className="block text-xs font-bold text-gray-500 uppercase">Localização no Mapa (Clique para obter Endereço)</label>
+                <div className="flex justify-between items-end">
+                    <label className="block text-xs font-bold text-gray-500 uppercase">Localização (Mapa)</label>
+                    <div className="flex gap-2">
+                        <select 
+                            className="rounded border-gray-300 bg-white text-gray-900 p-1 text-xs font-bold border shadow-sm cursor-pointer"
+                            value={mapType}
+                            onChange={e => setMapType(e.target.value as any)}
+                        >
+                            <option value="hybrid">Híbrido</option>
+                            <option value="satellite">Satélite</option>
+                            <option value="street">Mapa</option>
+                        </select>
+                    </div>
+                </div>
+                
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                    <div className="md:col-span-3">
                      <input
                       type="text"
-                      placeholder="Rua, Número, Bairro, CEP"
-                      className="w-full rounded border-gray-300 bg-white text-gray-900 shadow-sm p-3 text-sm font-semibold border-2"
+                      placeholder="Endereço Completo (Preenchimento Automático pelo Mapa)"
+                      className="w-full rounded border-gray-300 bg-white text-gray-900 shadow-sm p-3 text-sm font-semibold border-2 bg-gray-50"
                       value={formData.endereco}
                       onChange={e => setFormData({ ...formData, endereco: e.target.value })}
                     />
@@ -370,27 +403,18 @@ const App: React.FC = () => {
                       <label className="text-[10px] uppercase font-bold text-gray-400">Longitude</label>
                       <input type="text" readOnly className="w-full rounded bg-gray-100 border-gray-300 p-2 text-sm text-gray-700 font-mono border" value={formData.longitude} />
                    </div>
-                   <div className="flex items-end">
-                      <select 
-                        className="w-full rounded border-gray-300 bg-[#f38b00] text-white p-2 text-xs font-black uppercase shadow-sm cursor-pointer"
-                        value={mapType}
-                        onChange={e => setMapType(e.target.value as any)}
-                      >
-                        <option value="satellite">Satélite</option>
-                        <option value="street">Mapa</option>
-                      </select>
-                   </div>
                 </div>
                 
-                <div id="map-container" className="w-full h-80 bg-gray-100 rounded-lg overflow-hidden border-2 border-gray-200 shadow-inner z-10"></div>
-                <p className="text-[10px] text-gray-400 italic">Ao posicionar o marcador, o endereço será preenchido automaticamente.</p>
+                <div id="map-container" className="w-full h-80 bg-gray-200 rounded-lg overflow-hidden border-2 border-gray-300 shadow-inner z-10 relative"></div>
+                <p className="text-[10px] text-gray-400 italic">Arraste o marcador para ajustar a localização exata.</p>
               </div>
             </section>
 
+            {/* Seção 3 */}
             <section className="space-y-6">
-              <div className="flex items-center gap-3">
-                <span className="bg-[#1e2b58] text-white px-3 py-1 rounded text-sm font-bold">03</span>
-                <h2 className="text-lg font-black text-[#1e2b58] uppercase">Levantamento de Danos</h2>
+              <div className="flex items-center gap-3 border-b border-gray-100 pb-2">
+                <span className="bg-[#f38b00] text-white w-8 h-8 flex items-center justify-center rounded-full font-bold">3</span>
+                <h2 className="text-lg font-black text-gray-700 uppercase">Levantamento de Danos</h2>
               </div>
               
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2">
@@ -402,8 +426,8 @@ const App: React.FC = () => {
                       onClick={() => handleDanoToggle(item)}
                       className={`p-2 text-[10px] font-bold uppercase rounded border-2 transition text-center ${
                         isActive 
-                          ? 'bg-[#1e2b58] text-white border-[#1e2b58] shadow-lg scale-105' 
-                          : 'bg-white text-gray-500 border-gray-100 hover:border-gray-300'
+                          ? 'bg-[#f38b00] text-white border-[#f38b00] shadow-md transform scale-105' 
+                          : 'bg-white text-gray-500 border-gray-200 hover:border-[#f38b00] hover:text-[#f38b00]'
                       }`}
                     >
                       {item}
@@ -414,37 +438,37 @@ const App: React.FC = () => {
 
               <div className="space-y-6 mt-6">
                 {formData.levantamentoDanos.map((dano, idx) => (
-                  <div key={idx} className="bg-[#f8f9fa] p-5 rounded-lg border-l-4 border-[#1e2b58] shadow-sm space-y-4">
+                  <div key={idx} className="bg-gray-50 p-5 rounded-lg border-l-4 border-[#f38b00] shadow-sm space-y-4 animate-fade-in">
                     <div className="flex justify-between items-center">
-                      <h3 className="font-black text-[#1e2b58] uppercase text-xs tracking-wider">{dano.tipo}</h3>
+                      <h3 className="font-black text-gray-800 uppercase text-sm tracking-wider">{dano.tipo}</h3>
                       <button 
                         onClick={() => handleDanoToggle(dano.tipo)}
-                        className="text-red-600 hover:text-red-800 text-[10px] font-bold uppercase underline"
+                        className="text-red-500 hover:text-red-700 text-[10px] font-bold uppercase flex items-center gap-1"
                       >
-                        Remover Elemento
+                        Remover
                       </button>
                     </div>
                     <textarea
-                      placeholder={`Detalhes técnicos sobre os danos em ${dano.tipo}...`}
-                      className="w-full rounded border-gray-300 bg-white text-gray-900 shadow-sm p-3 h-24 text-sm border-2 font-medium"
+                      placeholder={`Descreva os danos observados em ${dano.tipo}...`}
+                      className="w-full rounded border-gray-300 bg-white text-gray-900 shadow-sm p-3 h-24 text-sm border focus:ring-[#f38b00] focus:border-[#f38b00]"
                       value={dano.descricao}
                       onChange={e => handleDanoDescChange(dano.tipo, e.target.value)}
                     />
                     <div className="space-y-2">
-                       <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest">Registros Fotográficos</label>
+                       <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest">Fotos</label>
                        <div className="flex flex-wrap gap-3">
                           {dano.fotos.map((foto, fIdx) => (
-                            <div key={fIdx} className="relative group">
-                              <img src={foto} className="w-24 h-24 object-cover rounded border-2 border-white shadow-md" />
+                            <div key={fIdx} className="relative group w-24 h-24">
+                              <img src={foto} className="w-full h-full object-cover rounded border border-gray-200 shadow-sm" />
                               <button 
                                 onClick={() => removeFoto(dano.tipo, fIdx)}
-                                className="absolute -top-2 -right-2 bg-red-600 text-white rounded-full w-6 h-6 flex items-center justify-center text-[10px] shadow-lg border-2 border-white"
+                                className="absolute -top-2 -right-2 bg-red-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs shadow-md opacity-0 group-hover:opacity-100 transition"
                               >✕</button>
                             </div>
                           ))}
-                          <label className="w-24 h-24 flex flex-col items-center justify-center border-2 border-dashed border-gray-300 rounded bg-white cursor-pointer hover:bg-gray-50 hover:border-[#1e2b58] transition">
-                            <span className="text-2xl text-gray-300 font-light">+</span>
-                            <span className="text-[10px] text-gray-400 font-bold uppercase">Anexar</span>
+                          <label className="w-24 h-24 flex flex-col items-center justify-center border-2 border-dashed border-gray-300 rounded bg-white cursor-pointer hover:bg-gray-50 hover:border-[#f38b00] transition group">
+                            <span className="text-2xl text-gray-300 group-hover:text-[#f38b00]">+</span>
+                            <span className="text-[9px] text-gray-400 font-bold uppercase mt-1">Adicionar</span>
                             <input type="file" multiple className="hidden" accept="image/*" onChange={e => handleFotoUpload(dano.tipo, e)} />
                           </label>
                        </div>
@@ -454,43 +478,46 @@ const App: React.FC = () => {
               </div>
             </section>
 
+            {/* Seção 4 */}
             <section className="space-y-6">
-              <div className="flex items-center gap-3">
-                <span className="bg-[#1e2b58] text-white px-3 py-1 rounded text-sm font-bold">04</span>
-                <h2 className="text-lg font-black text-[#1e2b58] uppercase">Classificação Final</h2>
+              <div className="flex items-center gap-3 border-b border-gray-100 pb-2">
+                <span className="bg-[#f38b00] text-white w-8 h-8 flex items-center justify-center rounded-full font-bold">4</span>
+                <h2 className="text-lg font-black text-gray-700 uppercase">Classificação Final</h2>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="space-y-1">
-                  <label className="block text-xs font-bold text-gray-500 uppercase">Parecer de Danos</label>
+                  <label className="block text-xs font-bold text-gray-500 uppercase">Parecer de Danos</label>                  
                   <select
-                    className="w-full rounded border-gray-300 bg-white text-gray-900 shadow-sm p-4 text-sm font-black border-2"
+                    className="w-full rounded border-gray-300 bg-white text-gray-900 shadow-sm p-4 text-sm font-black border-2 focus:ring-[#f38b00] focus:border-[#f38b00]"
                     value={formData.classificacaoDanos}
                     onChange={e => setFormData({ ...formData, classificacaoDanos: e.target.value })}
                   >
+                    <option value="" disabled>Selecionar...</option>
                     {CLASSIFICACOES.map(c => <option key={c} value={c}>{c}</option>)}
                   </select>
                 </div>
-                <div className="bg-[#1e2b58] p-5 rounded-lg text-white flex flex-col justify-center shadow-lg">
-                  <p className="text-[10px] text-white/60 font-black uppercase mb-1 tracking-widest">Nível de Destruição Estimado</p>
-                  <p className="text-xl font-black uppercase text-[#f38b00]">{getNivelDestruicao(formData.classificacaoDanos)}</p>
-                  <p className="text-xs text-white/80 mt-2 font-bold italic">Percentual: {getPercentualDestruicao(formData.classificacaoDanos)}</p>
+                <div className="bg-gray-800 p-5 rounded-lg text-white flex flex-col justify-center shadow-lg border-l-8 border-[#f38b00]">
+                  <p className="text-[10px] text-gray-400 font-black uppercase mb-1 tracking-widest">Estimativa do Sistema</p>
+                  <p className="text-xl font-black uppercase text-white">{getNivelDestruicao(formData.classificacaoDanos) || '---'}</p>
+                  <p className="text-xs text-[#f38b00] mt-2 font-bold italic">Dano Estimado: {getPercentualDestruicao(formData.classificacaoDanos)}</p>
                 </div>
               </div>
             </section>
 
-            <div className="pt-8 flex flex-col md:flex-row gap-4">
+            {/* Ações */}
+            <div className="pt-8 flex flex-col md:flex-row gap-4 border-t border-gray-200 mt-8">
               <button 
                 onClick={() => setShowPreview(!showPreview)}
-                className="flex-1 bg-white text-[#1e2b58] border-2 border-[#1e2b58] font-black py-4 rounded uppercase text-sm tracking-widest hover:bg-gray-50 transition shadow-md"
+                className="flex-1 bg-white text-gray-700 border-2 border-gray-300 font-black py-4 rounded uppercase text-sm tracking-widest hover:bg-gray-50 transition shadow-sm"
               >
                 {showPreview ? 'Ocultar Prévia' : 'Visualizar Relatório'}
               </button>
               {showPreview && (
                 <button 
                   onClick={generatePDF}
-                  className="flex-1 bg-[#f38b00] text-white font-black py-4 rounded uppercase text-sm tracking-widest hover:bg-[#e07f00] transition shadow-md border-b-4 border-[#c06a00]"
+                  className="flex-1 bg-[#f38b00] text-white font-black py-4 rounded uppercase text-sm tracking-widest hover:bg-orange-600 transition shadow-lg border-b-4 border-orange-700 active:border-b-0 active:translate-y-1"
                 >
-                  Gerar Laudo PDF Oficial
+                  Baixar Laudo PDF
                 </button>
               )}
             </div>
@@ -499,9 +526,9 @@ const App: React.FC = () => {
       </main>
 
       {showPreview && (
-        <div className="max-w-5xl mx-auto mb-20">
-          <div className="bg-gray-800 p-8 rounded-lg overflow-x-auto shadow-2xl border-4 border-gray-700">
-             <div className="inline-block min-w-full">
+        <div className="max-w-5xl mx-auto mb-20 px-4">
+          <div className="bg-gray-300 p-4 md:p-8 rounded-lg overflow-x-auto shadow-inner border border-gray-400">
+             <div className="inline-block min-w-[21cm] mx-auto bg-white shadow-2xl">
                 <LaudoPreview data={formData} engenheiro={currentEngenheiro} />
              </div>
           </div>
@@ -515,15 +542,14 @@ const App: React.FC = () => {
         initialData={editingEng}
       />
 
-      <footer className="bg-white border-t border-gray-200 py-10">
+      <footer className="bg-[#1e1e1e] text-white py-8 border-t-4 border-[#f38b00]">
         <div className="max-w-6xl mx-auto px-4 flex flex-col md:flex-row justify-between items-center gap-6">
           <div className="text-center md:text-left">
-            <p className="text-[#1e2b58] font-black uppercase text-sm">Governo do Estado do Paraná</p>
-            <p className="text-gray-400 text-xs font-bold">Secretaria de Estado da Segurança Pública</p>
+            <p className="font-black uppercase text-sm">Governo do Estado do Paraná</p>
+            <p className="text-xs text-gray-400">Defesa Civil - Coordenadoria Estadual</p>
           </div>
-          <div className="flex gap-4 grayscale opacity-50">
-            <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/1/14/Símbolo_Internacional_da_Proteção_Civil.svg/1200px-Símbolo_Internacional_da_Proteção_Civil.svg.png" className="h-10" />
-            <img src="https://www.governodigital.pr.gov.br/sites/governo-digital/files/styles/extra_large/public/imagem/2021-03/logo_governo_pr.png?itok=39S9I5xL" className="h-10" />
+          <div className="text-xs text-gray-500">
+            &copy; {new Date().getFullYear()} Sistema de Laudos
           </div>
         </div>
       </footer>
