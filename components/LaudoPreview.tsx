@@ -13,13 +13,9 @@ interface Props {
 const LaudoPreview: React.FC<Props> = ({ data, engenheiro }) => {
   // URL para mapa estático (simulado para este ambiente, idealmente seria uma API Key real)
   const mapUrl = `https://maps.googleapis.com/maps/api/staticmap?center=${data.latitude},${data.longitude}&zoom=18&size=600x300&maptype=hybrid&markers=color:red%7Clabel:A%7C${data.latitude},${data.longitude}&key=YOUR_API_KEY_HERE_IF_NEEDED`; 
-  // Nota: Sem API Key do Google, isso pode falhar em produção real, mas a lógica está correta. 
-  // Para visualização local sem chave, podemos usar um placeholder ou o container do Leaflet se fosse renderização direta, 
-  // mas para PDF estático, uma imagem é necessária. Vou usar um placeholder visual se a imagem falhar ou para demonstração.
   
   return (
-    <div id="laudo-pdf-content" className="bg-white p-12 font-sans text-xs text-gray-900 w-full max-w-[21cm] min-h-[29.7cm] relative">
-      {/* Background Pattern Simples para simular papel timbrado se necessário, ou branco limpo */}
+    <div id="laudo-pdf-content" className="bg-white p-12 font-sans text-xs text-gray-900 w-full max-w-[21cm] h-auto relative">
       
       {/* HEADER */}
       <div className="flex justify-between items-start mb-8 border-b-2 border-gray-800 pb-6">
@@ -77,12 +73,11 @@ const LaudoPreview: React.FC<Props> = ({ data, engenheiro }) => {
       </div>
 
       {/* MAPA */}
-      <div className="mb-8 border-2 border-gray-300 p-1 flex justify-center items-center bg-gray-100 min-h-[200px]">
-         {/* Simulando a imagem do mapa. Em produção real, use a imagem gerada ou capture o canvas */}
+      <div className="mb-8 border-2 border-gray-300 p-1 flex justify-center items-center bg-gray-100 min-h-[200px] page-break-inside-avoid">
+         {/* Simulando a imagem do mapa. */}
          <div className="text-center text-gray-400">
             <p className="font-bold mb-2">LOCALIZAÇÃO GEORREFERENCIADA</p>
             <div className="w-full h-64 bg-gray-200 flex items-center justify-center relative overflow-hidden">
-                {/* Fallback visual para o PDF */}
                 <div className="absolute inset-0 flex items-center justify-center opacity-20 text-6xl">🗺️</div>
                 <div className="z-10 bg-white p-2 rounded shadow text-xs">
                     Lat: {data.latitude}<br/>Lon: {data.longitude}
@@ -92,12 +87,12 @@ const LaudoPreview: React.FC<Props> = ({ data, engenheiro }) => {
       </div>
 
       {/* DANOS */}
-      <div className="mb-8 page-break-inside-avoid">
+      <div className="mb-8">
         <h2 className="font-bold uppercase text-sm mb-4 border-b border-gray-300 pb-1">Levantamento de Danos</h2>
         <div className="space-y-6">
             {data.levantamentoDanos.length === 0 && <p className="italic text-gray-500">Nenhum dano registrado.</p>}
             {data.levantamentoDanos.map((dano, idx) => (
-                <div key={idx} className="mb-4">
+                <div key={idx} className="mb-4 page-break-inside-avoid">
                     <p className="mb-2 text-justify">
                         <span className="font-bold uppercase text-red-700 mr-2">[{dano.tipo}]:</span> 
                         {dano.descricao}
@@ -133,7 +128,7 @@ const LaudoPreview: React.FC<Props> = ({ data, engenheiro }) => {
       </div>
 
       {/* RODAPÉ */}
-      <div className="absolute bottom-8 left-12 right-12 text-center text-[10px] text-gray-500 border-t border-gray-200 pt-2">
+      <div className="mt-16 text-center text-[10px] text-gray-500 border-t border-gray-200 pt-4 page-break-inside-avoid">
         <p>Palácio das Araucárias - 1º andar - Setor C | Centro Cívico | Curitiba/PR | CEP 80.530-140</p>
         <p>E-mail: defesacivil@defesacivil.pr.gov.br | Fone: (41) 3281-2500</p>
         <p className="mt-1 font-bold italic">"Defesa Civil somos todos nós"</p>

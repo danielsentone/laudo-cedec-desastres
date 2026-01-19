@@ -255,13 +255,23 @@ const App: React.FC = () => {
 
   const generatePDF = () => {
     const element = document.getElementById('laudo-pdf-content');
+    
+    // Configurações otimizadas para evitar páginas em branco e permitir múltiplas páginas
     const opt = {
-      margin: 5,
-      filename: `laudo-defesacivil-${formData.id}.pdf`,
+      margin: [10, 10, 10, 10], // Margem em mm (Top, Left, Bottom, Right)
+      filename: `laudo-defesacivil-${formData.municipio}-${formData.id}.pdf`,
       image: { type: 'jpeg', quality: 0.98 },
-      html2canvas: { scale: 2, useCORS: true },
-      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+      html2canvas: { 
+        scale: 2, // Melhora a qualidade
+        useCORS: true, // Permite carregar imagens externas se houver
+        letterRendering: true,
+        scrollY: 0,
+      },
+      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+      pagebreak: { mode: ['avoid-all', 'css', 'legacy'] } // Evita cortes bruscos
     };
+    
+    // Pequeno delay para garantir que o renderizador pegue o elemento visível
     html2pdf().set(opt).from(element).save();
   };
 
@@ -337,14 +347,16 @@ const App: React.FC = () => {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="space-y-1">
                   <label className="block text-xs font-bold text-gray-500 uppercase">Município do Paraná</label>
-                  <select
+                  <input 
+                    list="municipios-list"
                     className="w-full rounded border-gray-300 bg-white text-gray-900 shadow-sm focus:ring-[#f38b00] focus:border-[#f38b00] p-3 text-sm font-semibold border-2"
                     value={formData.municipio}
                     onChange={e => setFormData({ ...formData, municipio: e.target.value })}
-                  >
-                    <option value="" disabled>Selecionar...</option>
-                    {MUNICIPIOS_PR.map(m => <option key={m} value={m}>{m}</option>)}
-                  </select>
+                    placeholder="Digite para buscar..."
+                  />
+                  <datalist id="municipios-list">
+                    {MUNICIPIOS_PR.map(m => <option key={m} value={m} />)}
+                  </datalist>
                 </div>
                 <div className="space-y-1">
                   <label className="block text-xs font-bold text-gray-500 uppercase">Data do Levantamento</label>
@@ -358,16 +370,16 @@ const App: React.FC = () => {
               </div>
 
               <div className="bg-orange-50 p-4 rounded-lg border-2 border-dashed border-orange-200">
-                <div className="flex items-center justify-between mb-3">
+                <div className="flex flex-col sm:flex-row sm:items-end justify-between mb-3 gap-2">
                   <label className="block text-xs font-bold text-[#f38b00] uppercase">Engenheiro Responsável</label>
                   <button 
                     onClick={() => { setEditingEng(null); setIsEngModalOpen(true); }}
-                    className="text-[10px] bg-[#f38b00] text-white px-3 py-1 rounded-full hover:bg-orange-600 transition uppercase font-bold"
+                    className="text-[10px] bg-[#f38b00] text-white px-3 py-2 rounded-full hover:bg-orange-600 transition uppercase font-bold self-start sm:self-auto"
                   >
-                    + Novo
+                    + Novo Engenheiro
                   </button>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex flex-col sm:flex-row gap-2">
                   <select
                     className="flex-1 rounded border-gray-300 bg-white text-gray-900 shadow-sm p-3 text-sm font-bold border-2 focus:border-[#f38b00] focus:ring-[#f38b00]"
                     value={formData.engenheiroId}
@@ -383,7 +395,7 @@ const App: React.FC = () => {
                   <button 
                     onClick={() => { if(currentEngenheiro) { setEditingEng(currentEngenheiro); setIsEngModalOpen(true); } }}
                     disabled={!currentEngenheiro}
-                    className="px-4 py-2 bg-white text-gray-700 rounded text-xs font-bold hover:bg-gray-50 border-2 border-gray-300 disabled:opacity-50"
+                    className="px-4 py-3 sm:py-2 bg-white text-gray-700 rounded text-xs font-bold hover:bg-gray-50 border-2 border-gray-300 disabled:opacity-50"
                   >
                     EDITAR
                   </button>
