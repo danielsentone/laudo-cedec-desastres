@@ -10,12 +10,24 @@ export interface LaudoData {
   municipio: string;
   data: string;
   engenheiroId: string;
-  inscricaoMunicipal: string;
+  
+  // Identificação do Imóvel
+  zona: 'Urbano' | 'Rural';
   proprietario: string;
   requerente: string;
   endereco: string;
   latitude: string;
   longitude: string;
+  
+  // Campos Urbanos
+  indicacaoFiscal: string;
+  inscricaoImobiliaria: string;
+  matricula: string;
+
+  // Campos Rurais
+  nirf: string;
+  incra: string;
+
   tipologia: string;
   tipologiaOutro: string;
   levantamentoDanos: DanoInfo[];

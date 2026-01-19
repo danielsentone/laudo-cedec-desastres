@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { MUNICIPIOS_PR, TIPOLOGIAS, ITENS_DANOS, CLASSIFICACOES, ENGENHEIROS_INICIAIS, Engenheiro } from './constants';
 import { LaudoData } from './types';
@@ -10,6 +9,8 @@ import { LOGO_DEFESA_CIVIL_BASE64 } from './assets';
 // @ts-ignore
 const html2pdf = window.html2pdf;
 // @ts-ignore
+const html2canvas = window.html2canvas;
+// @ts-ignore
 const L = window.L;
 
 const App: React.FC = () => {
@@ -18,6 +19,7 @@ const App: React.FC = () => {
   const [editingEng, setEditingEng] = useState<Engenheiro | null>(null);
   const [showPreview, setShowPreview] = useState(false);
   const [isLoadingLocation, setIsLoadingLocation] = useState(false);
+  const [mapSnapshot, setMapSnapshot] = useState<string | null>(null);
   const mapRef = useRef<any>(null);
   const markerRef = useRef<any>(null);
   
@@ -26,7 +28,12 @@ const App: React.FC = () => {
     municipio: '',
     data: new Date().toISOString().split('T')[0],
     engenheiroId: '',
-    inscricaoMunicipal: '',
+    zona: 'Urbano', // Default
+    indicacaoFiscal: '',
+    inscricaoImobiliaria: '',
+    matricula: '',
+    nirf: '',
+    incra: '',
     proprietario: '',
     requerente: '',
     endereco: '',
@@ -142,17 +149,21 @@ const App: React.FC = () => {
     if (!mapRef.current) {
       mapRef.current = L.map('map-container').setView([parseFloat(formData.latitude), parseFloat(formData.longitude)], 16);
       
+      // IMPORTANTE: crossOrigin: true é necessário para o html2canvas conseguir capturar a imagem do mapa
       const layers = {
         street: L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-          attribution: '&copy; OpenStreetMap contributors'
+          attribution: '&copy; OpenStreetMap contributors',
+          crossOrigin: true
         }),
         satellite: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-          attribution: 'Esri &copy; Source: Esri, i-cubed, USDA, USGS'
+          attribution: 'Esri &copy; Source: Esri, i-cubed, USDA, USGS',
+          crossOrigin: true
         }),
         hybrid: L.tileLayer('http://{s}.google.com/vt/lyrs=s,h&x={x}&y={y}&z={z}',{
             maxZoom: 20,
             subdomains:['mt0','mt1','mt2','mt3'],
-            attribution: 'Map data &copy;2024 Google'
+            attribution: 'Map data &copy;2024 Google',
+            crossOrigin: true
         })
       };
 
@@ -253,13 +264,45 @@ const App: React.FC = () => {
     }));
   };
 
+  const handleTogglePreview = async () => {
+    if (!showPreview) {
+        // Ao abrir o preview, tenta capturar a imagem do mapa atual
+        const mapElement = document.getElementById('map-container');
+        if (mapElement && (window as any).html2canvas) {
+            try {
+                // Tira um print do elemento do mapa
+                const canvas = await (window as any).html2canvas(mapElement, {
+                    useCORS: true,
+                    allowTaint: true,
+                    logging: false,
+                    scale: 1 // Mantém resolução original para performance
+                });
+                setMapSnapshot(canvas.toDataURL('image/jpeg', 0.8));
+            } catch (error) {
+                console.error("Erro ao capturar imagem do mapa:", error);
+                setMapSnapshot(null);
+            }
+        }
+    }
+    setShowPreview(!showPreview);
+  };
+
   const generatePDF = () => {
     const element = document.getElementById('laudo-pdf-content');
     
+    // Sanitiza strings para evitar caracteres inválidos no nome do arquivo
+    const safeText = (text: string) => text ? text.replace(/[\/\\:*?"<>|]/g, '').trim() : '';
+    
+    const municipio = safeText(formData.municipio) || 'Municipio';
+    const data = formData.data;
+    const proprietario = safeText(formData.proprietario) || 'Proprietario';
+    
+    const filename = `${municipio}_${data}_${proprietario}.pdf`;
+
     // Configurações otimizadas para evitar páginas em branco e permitir múltiplas páginas
     const opt = {
       margin: [10, 10, 10, 10], // Margem em mm (Top, Left, Bottom, Right)
-      filename: `laudo-defesacivil-${formData.municipio}-${formData.id}.pdf`,
+      filename: filename,
       image: { type: 'jpeg', quality: 0.98 },
       html2canvas: { 
         scale: 2, // Melhora a qualidade
@@ -410,16 +453,97 @@ const App: React.FC = () => {
                 <h2 className="text-lg font-black text-gray-700 uppercase">Identificação do Imóvel</h2>
               </div>
               
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="space-y-1">
-                  <label className="block text-xs font-bold text-gray-500 uppercase">Inscrição Municipal</label>
-                  <input
-                    type="text"
-                    className="w-full rounded border-gray-300 bg-white text-gray-900 shadow-sm focus:ring-[#f38b00] focus:border-[#f38b00] p-3 text-sm font-semibold border-2"
-                    value={formData.inscricaoMunicipal}
-                    onChange={e => setFormData({ ...formData, inscricaoMunicipal: e.target.value })}
-                  />
+              <div className="mb-6">
+                <label className="block text-xs font-bold text-gray-500 uppercase mb-3">Zona do Imóvel</label>
+                <div className="grid grid-cols-2 gap-4">
+                    <button
+                        onClick={() => setFormData({...formData, zona: 'Urbano'})}
+                        className={`group flex flex-col items-center justify-center p-4 rounded-lg border-2 transition-all duration-200 ${
+                            formData.zona === 'Urbano'
+                            ? 'border-[#f38b00] bg-orange-50 shadow-md'
+                            : 'border-gray-200 bg-white hover:border-orange-200 hover:bg-gray-50'
+                        }`}
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" className={`h-8 w-8 mb-2 ${formData.zona === 'Urbano' ? 'text-[#f38b00]' : 'text-gray-400 group-hover:text-orange-300'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                        </svg>
+                        <span className={`text-sm font-black uppercase tracking-wider ${formData.zona === 'Urbano' ? 'text-gray-900' : 'text-gray-500'}`}>Urbano</span>
+                    </button>
+
+                    <button
+                        onClick={() => setFormData({...formData, zona: 'Rural'})}
+                        className={`group flex flex-col items-center justify-center p-4 rounded-lg border-2 transition-all duration-200 ${
+                            formData.zona === 'Rural'
+                            ? 'border-[#f38b00] bg-orange-50 shadow-md'
+                            : 'border-gray-200 bg-white hover:border-orange-200 hover:bg-gray-50'
+                        }`}
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" className={`h-8 w-8 mb-2 ${formData.zona === 'Rural' ? 'text-[#f38b00]' : 'text-gray-400 group-hover:text-orange-300'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        <span className={`text-sm font-black uppercase tracking-wider ${formData.zona === 'Rural' ? 'text-gray-900' : 'text-gray-500'}`}>Rural</span>
+                    </button>
                 </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                
+                {formData.zona === 'Urbano' ? (
+                    <>
+                        <div className="space-y-1">
+                          <label className="block text-xs font-bold text-gray-500 uppercase">Indicação Fiscal</label>
+                          <input
+                            type="text"
+                            placeholder="Ex: 00.00.000.0000.000"
+                            className="w-full rounded border-gray-300 bg-white text-gray-900 shadow-sm focus:ring-[#f38b00] focus:border-[#f38b00] p-3 text-sm font-semibold border-2"
+                            value={formData.indicacaoFiscal}
+                            onChange={e => setFormData({ ...formData, indicacaoFiscal: e.target.value })}
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="block text-xs font-bold text-gray-500 uppercase">Inscrição Imobiliária</label>
+                          <input
+                            type="text"
+                            className="w-full rounded border-gray-300 bg-white text-gray-900 shadow-sm focus:ring-[#f38b00] focus:border-[#f38b00] p-3 text-sm font-semibold border-2"
+                            value={formData.inscricaoImobiliaria}
+                            onChange={e => setFormData({ ...formData, inscricaoImobiliaria: e.target.value })}
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="block text-xs font-bold text-gray-500 uppercase">Matrícula</label>
+                          <input
+                            type="text"
+                            className="w-full rounded border-gray-300 bg-white text-gray-900 shadow-sm focus:ring-[#f38b00] focus:border-[#f38b00] p-3 text-sm font-semibold border-2"
+                            value={formData.matricula}
+                            onChange={e => setFormData({ ...formData, matricula: e.target.value })}
+                          />
+                        </div>
+                    </>
+                ) : (
+                    <>
+                        <div className="space-y-1">
+                          <label className="block text-xs font-bold text-gray-500 uppercase">NIRF (Receita Federal)</label>
+                          <input
+                            type="text"
+                            placeholder="Número do Imóvel na Receita Federal"
+                            className="w-full rounded border-gray-300 bg-white text-gray-900 shadow-sm focus:ring-[#f38b00] focus:border-[#f38b00] p-3 text-sm font-semibold border-2"
+                            value={formData.nirf}
+                            onChange={e => setFormData({ ...formData, nirf: e.target.value })}
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="block text-xs font-bold text-gray-500 uppercase">INCRA (CCIR)</label>
+                          <input
+                            type="text"
+                            placeholder="Código do Imóvel Rural"
+                            className="w-full rounded border-gray-300 bg-white text-gray-900 shadow-sm focus:ring-[#f38b00] focus:border-[#f38b00] p-3 text-sm font-semibold border-2"
+                            value={formData.incra}
+                            onChange={e => setFormData({ ...formData, incra: e.target.value })}
+                          />
+                        </div>
+                    </>
+                )}
+
                 <div className="space-y-1">
                   <label className="block text-xs font-bold text-gray-500 uppercase">Proprietário</label>
                   <input
@@ -613,7 +737,7 @@ const App: React.FC = () => {
             {/* Ações */}
             <div className="pt-8 flex flex-col md:flex-row gap-4 border-t border-gray-200 mt-8">
               <button 
-                onClick={() => setShowPreview(!showPreview)}
+                onClick={handleTogglePreview}
                 className="flex-1 bg-white text-gray-700 border-2 border-gray-300 font-black py-4 rounded uppercase text-sm tracking-widest hover:bg-gray-50 transition shadow-sm"
               >
                 {showPreview ? 'Ocultar Prévia' : 'Visualizar Relatório'}
@@ -635,7 +759,7 @@ const App: React.FC = () => {
         <div className="max-w-5xl mx-auto mb-20 px-4">
           <div className="bg-gray-300 p-4 md:p-8 rounded-lg overflow-x-auto shadow-inner border border-gray-400">
              <div className="inline-block min-w-[21cm] mx-auto bg-white shadow-2xl">
-                <LaudoPreview data={formData} engenheiro={currentEngenheiro} />
+                <LaudoPreview data={formData} engenheiro={currentEngenheiro} mapSnapshot={mapSnapshot} />
              </div>
           </div>
         </div>

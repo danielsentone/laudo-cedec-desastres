@@ -8,12 +8,18 @@ import { LOGO_DEFESA_CIVIL_BASE64, LOGO_PARANA_BASE64 } from '../assets';
 interface Props {
   data: LaudoData;
   engenheiro: Engenheiro | undefined;
+  mapSnapshot: string | null;
 }
 
-const LaudoPreview: React.FC<Props> = ({ data, engenheiro }) => {
-  // URL para mapa estático (simulado para este ambiente, idealmente seria uma API Key real)
-  const mapUrl = `https://maps.googleapis.com/maps/api/staticmap?center=${data.latitude},${data.longitude}&zoom=18&size=600x300&maptype=hybrid&markers=color:red%7Clabel:A%7C${data.latitude},${data.longitude}&key=YOUR_API_KEY_HERE_IF_NEEDED`; 
-  
+const LaudoPreview: React.FC<Props> = ({ data, engenheiro, mapSnapshot }) => {
+  // Helper para exibir "Não Fornecido/Identificado" caso o valor seja vazio
+  const showVal = (val: string | undefined | null) => {
+    if (!val || val.trim() === '') {
+        return <span className="text-gray-400 italic font-normal">Não Fornecido/Identificado</span>;
+    }
+    return val;
+  };
+
   return (
     <div id="laudo-pdf-content" className="bg-white p-12 font-sans text-xs text-gray-900 w-full max-w-[21cm] h-auto relative">
       
@@ -40,7 +46,7 @@ const LaudoPreview: React.FC<Props> = ({ data, engenheiro }) => {
       {/* DADOS GERAIS */}
       <div className="mb-6 grid grid-cols-2 gap-4">
         <div>
-            <span className="font-bold uppercase">Município:</span> <span className="uppercase ml-2 border-b border-dotted border-gray-400">{data.municipio}</span>
+            <span className="font-bold uppercase">Município:</span> <span className="uppercase ml-2 border-b border-dotted border-gray-400">{showVal(data.municipio)}</span>
         </div>
         <div className="text-right">
             <span className="font-bold uppercase">Data:</span> <span className="uppercase ml-2 border-b border-dotted border-gray-400">{new Date(data.data).toLocaleDateString('pt-BR')}</span>
@@ -51,37 +57,70 @@ const LaudoPreview: React.FC<Props> = ({ data, engenheiro }) => {
       <div className="mb-8">
         <h2 className="font-bold uppercase text-sm mb-4 border-b border-gray-300 pb-1">Informações do Imóvel</h2>
         <div className="space-y-3 pl-2">
-            <div className="grid grid-cols-1">
-                <p><span className="font-bold uppercase w-40 inline-block">Inscrição Municipal:</span> {data.inscricaoMunicipal || 'N/A'}</p>
+            <div className="grid grid-cols-1 mb-2">
+                <p><span className="font-bold uppercase w-40 inline-block">Zona do Imóvel:</span> {data.zona}</p>
+            </div>
+
+            {/* Campos Condicionais baseados na Zona */}
+            {data.zona === 'Urbano' ? (
+                <>
+                    <div className="grid grid-cols-1">
+                        <p><span className="font-bold uppercase w-40 inline-block">Indicação Fiscal:</span> {showVal(data.indicacaoFiscal)}</p>
+                    </div>
+                    <div className="grid grid-cols-1">
+                        <p><span className="font-bold uppercase w-40 inline-block">Inscrição Imobiliária:</span> {showVal(data.inscricaoImobiliaria)}</p>
+                    </div>
+                    <div className="grid grid-cols-1">
+                        <p><span className="font-bold uppercase w-40 inline-block">Matrícula:</span> {showVal(data.matricula)}</p>
+                    </div>
+                </>
+            ) : (
+                <>
+                     <div className="grid grid-cols-1">
+                        <p><span className="font-bold uppercase w-40 inline-block">NIRF (Receita):</span> {showVal(data.nirf)}</p>
+                    </div>
+                    <div className="grid grid-cols-1">
+                        <p><span className="font-bold uppercase w-40 inline-block">INCRA (CCIR):</span> {showVal(data.incra)}</p>
+                    </div>
+                </>
+            )}
+
+            <div className="grid grid-cols-1 mt-2">
+                <p><span className="font-bold uppercase w-40 inline-block">Proprietário:</span> {showVal(data.proprietario)}</p>
             </div>
             <div className="grid grid-cols-1">
-                <p><span className="font-bold uppercase w-40 inline-block">Proprietário:</span> {data.proprietario}</p>
+                <p><span className="font-bold uppercase w-40 inline-block">Requerente:</span> {showVal(data.requerente)}</p>
             </div>
             <div className="grid grid-cols-1">
-                <p><span className="font-bold uppercase w-40 inline-block">Requerente:</span> {data.requerente}</p>
-            </div>
-            <div className="grid grid-cols-1">
-                <p><span className="font-bold uppercase w-40 inline-block">Endereço:</span> {data.endereco}</p>
+                <p><span className="font-bold uppercase w-40 inline-block">Endereço:</span> {showVal(data.endereco)}</p>
             </div>
             <div className="grid grid-cols-1">
                 <p><span className="font-bold uppercase w-40 inline-block">Coordenadas:</span> {data.latitude}, {data.longitude}</p>
             </div>
             <div className="grid grid-cols-1">
-                <p><span className="font-bold uppercase w-40 inline-block">Tipologia:</span> {data.tipologia === 'Outro' ? data.tipologiaOutro : data.tipologia}</p>
+                <p><span className="font-bold uppercase w-40 inline-block">Tipologia:</span> {data.tipologia === 'Outro' ? showVal(data.tipologiaOutro) : showVal(data.tipologia)}</p>
             </div>
         </div>
       </div>
 
       {/* MAPA */}
       <div className="mb-8 border-2 border-gray-300 p-1 flex justify-center items-center bg-gray-100 min-h-[200px] page-break-inside-avoid">
-         {/* Simulando a imagem do mapa. */}
-         <div className="text-center text-gray-400">
+         <div className="text-center text-gray-400 w-full">
             <p className="font-bold mb-2">LOCALIZAÇÃO GEORREFERENCIADA</p>
-            <div className="w-full h-64 bg-gray-200 flex items-center justify-center relative overflow-hidden">
-                <div className="absolute inset-0 flex items-center justify-center opacity-20 text-6xl">🗺️</div>
-                <div className="z-10 bg-white p-2 rounded shadow text-xs">
-                    Lat: {data.latitude}<br/>Lon: {data.longitude}
-                </div>
+            <div className="w-full bg-gray-200 flex items-center justify-center relative overflow-hidden">
+                {mapSnapshot ? (
+                    <div className="w-full h-auto">
+                        <img src={mapSnapshot} alt="Mapa da Localização" className="w-full h-auto object-contain" />
+                    </div>
+                ) : (
+                    <div className="w-full h-64 flex flex-col items-center justify-center">
+                        <div className="text-6xl opacity-20">🗺️</div>
+                        <p className="text-[10px] mt-2">Mapa não disponível</p>
+                    </div>
+                )}
+            </div>
+            <div className="mt-2 text-[10px] text-gray-500">
+                Lat: {data.latitude} | Lon: {data.longitude}
             </div>
          </div>
       </div>
@@ -95,7 +134,7 @@ const LaudoPreview: React.FC<Props> = ({ data, engenheiro }) => {
                 <div key={idx} className="mb-4 page-break-inside-avoid">
                     <p className="mb-2 text-justify">
                         <span className="font-bold uppercase text-red-700 mr-2">[{dano.tipo}]:</span> 
-                        {dano.descricao}
+                        {showVal(dano.descricao)}
                     </p>
                     {dano.fotos.length > 0 && (
                         <div className="grid grid-cols-2 gap-2 mt-2">
@@ -113,9 +152,9 @@ const LaudoPreview: React.FC<Props> = ({ data, engenheiro }) => {
       <div className="mb-12 border-t-2 border-gray-800 pt-6 page-break-inside-avoid">
         <h2 className="font-bold uppercase text-center text-base mb-6">Classificação e Parecer Técnico</h2>
         <div className="grid grid-cols-1 gap-2 text-sm pl-4">
-            <p><span className="font-bold uppercase w-64 inline-block">Classificação do Dano:</span> {data.classificacaoDanos}</p>
-            <p><span className="font-bold uppercase w-64 inline-block">Nível de Destruição:</span> {getNivelDestruicao(data.classificacaoDanos)}</p>
-            <p><span className="font-bold uppercase w-64 inline-block">Percentual Estimado:</span> {getPercentualDestruicao(data.classificacaoDanos)}</p>
+            <p><span className="font-bold uppercase w-64 inline-block">Classificação do Dano:</span> {showVal(data.classificacaoDanos)}</p>
+            <p><span className="font-bold uppercase w-64 inline-block">Nível de Destruição:</span> {showVal(getNivelDestruicao(data.classificacaoDanos))}</p>
+            <p><span className="font-bold uppercase w-64 inline-block">Percentual Estimado:</span> {showVal(getPercentualDestruicao(data.classificacaoDanos))}</p>
         </div>
       </div>
 
