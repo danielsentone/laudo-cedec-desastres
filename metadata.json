@@ -1,0 +1,8 @@
+{
+  "name": "Defesa Civil PR - Gerador de Laudos",
+  "description": "Aplicativo para composição de laudos de imóveis afetados por desastres climáticos no Estado do Paraná, com integração de mapa e geração de PDF.",
+  "requestFramePermissions": [
+    "camera",
+    "geolocation"
+  ]
+}
