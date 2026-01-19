@@ -17,6 +17,7 @@ const App: React.FC = () => {
   const [isEngModalOpen, setIsEngModalOpen] = useState(false);
   const [editingEng, setEditingEng] = useState<Engenheiro | null>(null);
   const [showPreview, setShowPreview] = useState(false);
+  const [isLoadingLocation, setIsLoadingLocation] = useState(false);
   const mapRef = useRef<any>(null);
   const markerRef = useRef<any>(null);
   
@@ -42,26 +43,104 @@ const App: React.FC = () => {
   // Função para buscar endereço a partir de coordenadas (Reverse Geocoding)
   const fetchAddressFromCoords = async (lat: number, lng: number) => {
     try {
-      const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&addressdetails=1`);
+      // Adiciona timestamp para evitar cache
+      const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&addressdetails=1&t=${Date.now()}`, {
+        headers: {
+            'Accept-Language': 'pt-BR'
+        }
+      });
       const data = await response.json();
+      
       if (data && data.address) {
         const addr = data.address;
-        const rua = addr.road || addr.pedestrian || addr.suburb || '';
-        const numero = addr.house_number || 'S/N';
-        const bairro = addr.neighbourhood || addr.suburb || addr.city_district || '';
-        const cep = addr.postcode || '';
         
-        const fullAddress = `${rua}, ${numero}, ${bairro}, CEP: ${cep}`.replace(/^[,\s]+|[,\s]+$/g, '');
+        // Prioridade de campos para logradouro
+        const rua = addr.road || addr.street || addr.pedestrian || addr.path || addr.highway || addr.suburb || '';
+        
+        // Número: Se o mapa não tiver, usa 'S/N' como placeholder padrão de laudo, mas permite edição fácil
+        const numero = addr.house_number || 'S/N';
+        
+        // Bairro: Expande busca para cidades menores (village, town, hamlet)
+        const bairro = addr.neighbourhood || addr.suburb || addr.city_district || addr.village || addr.district || '';
+        
+        const cep = addr.postcode || '';
+        const cidade = addr.city || addr.town || addr.municipality || addr.village || '';
+
+        // Monta o endereço de forma estruturada: Rua, Número, Bairro - Cidade, CEP
+        const parts = [];
+        
+        if (rua) parts.push(rua);
+        parts.push(numero); // Sempre adiciona o número ou S/N na segunda posição
+        if (bairro) parts.push(bairro);
+        
+        let fullAddress = parts.join(', ');
+
+        // Adiciona cidade se não estiver contida no nome da rua/bairro
+        if (cidade && !fullAddress.includes(cidade)) {
+            fullAddress += ` - ${cidade}`; 
+        }
+        
+        if (cep) {
+            fullAddress += `, CEP: ${cep}`;
+        }
+        
         setFormData(prev => ({ ...prev, endereco: fullAddress }));
+      } else {
+        // Fallback se a API não retornar endereço estruturado
+        setFormData(prev => ({ ...prev, endereco: `Lat: ${lat}, Lon: ${lng} (Endereço não encontrado, preencha manualmente)` }));
       }
     } catch (error) {
       console.error("Erro ao buscar endereço:", error);
     }
   };
 
+  // Função para pegar localização do GPS
+  const handleGetLocation = () => {
+    if (!navigator.geolocation) {
+      alert("Geolocalização não é suportada pelo seu navegador.");
+      return;
+    }
+
+    setIsLoadingLocation(true);
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const { latitude, longitude } = position.coords;
+        
+        // 1. Atualiza formulário com coordenadas
+        updateCoords(latitude, longitude);
+        
+        // 2. Atualiza Mapa (Visual)
+        if (mapRef.current && markerRef.current) {
+          const newLatLng = new L.LatLng(latitude, longitude);
+          // Usa flyTo para uma transição suave até a localização do usuário
+          mapRef.current.flyTo(newLatLng, 18, {
+             animate: true,
+             duration: 1.5
+          });
+          markerRef.current.setLatLng(newLatLng);
+        }
+        
+        // 3. Busca o endereço correspondente à localização do GPS
+        fetchAddressFromCoords(latitude, longitude);
+        
+        setIsLoadingLocation(false);
+      },
+      (error) => {
+        setIsLoadingLocation(false);
+        let msg = "Erro ao obter localização.";
+        if (error.code === 1) msg = "Permissão de localização negada. Verifique as configurações do seu navegador.";
+        if (error.code === 2) msg = "Localização indisponível (Sinal GPS fraco).";
+        if (error.code === 3) msg = "Tempo limite esgotado ao buscar localização.";
+        alert(msg);
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+    );
+  };
+
   useEffect(() => {
     if (!mapRef.current) {
-      mapRef.current = L.map('map-container').setView([formData.latitude, formData.longitude], 16);
+      mapRef.current = L.map('map-container').setView([parseFloat(formData.latitude), parseFloat(formData.longitude)], 16);
       
       const layers = {
         street: L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -80,7 +159,7 @@ const App: React.FC = () => {
       // Inicializa com Híbrido
       layers[mapType].addTo(mapRef.current);
       
-      markerRef.current = L.marker([formData.latitude, formData.longitude], { draggable: true }).addTo(mapRef.current);
+      markerRef.current = L.marker([parseFloat(formData.latitude), parseFloat(formData.longitude)], { draggable: true }).addTo(mapRef.current);
 
       markerRef.current.on('dragend', (e: any) => {
         const { lat, lng } = e.target.getLatLng();
@@ -370,9 +449,24 @@ const App: React.FC = () => {
               </div>
 
               <div className="space-y-4 pt-4 border-t border-gray-100">
-                <div className="flex justify-between items-end">
+                <div className="flex justify-between items-end flex-wrap gap-2">
                     <label className="block text-xs font-bold text-gray-500 uppercase">Localização (Mapa)</label>
-                    <div className="flex gap-2">
+                    <div className="flex gap-2 items-center">
+                        <button
+                          onClick={handleGetLocation}
+                          disabled={isLoadingLocation}
+                          className="flex items-center gap-1 bg-[#f38b00] text-white px-3 py-1 rounded shadow text-xs font-bold hover:bg-orange-600 transition disabled:opacity-50"
+                        >
+                          {isLoadingLocation ? 'Buscando...' : (
+                            <>
+                              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                              </svg>
+                              Minha Localização
+                            </>
+                          )}
+                        </button>
                         <select 
                             className="rounded border-gray-300 bg-white text-gray-900 p-1 text-xs font-bold border shadow-sm cursor-pointer"
                             value={mapType}
@@ -389,7 +483,7 @@ const App: React.FC = () => {
                    <div className="md:col-span-3">
                      <input
                       type="text"
-                      placeholder="Endereço Completo (Preenchimento Automático pelo Mapa)"
+                      placeholder="Endereço Completo (Preenchimento Automático pelo Mapa ou GPS)"
                       className="w-full rounded border-gray-300 bg-white text-gray-900 shadow-sm p-3 text-sm font-semibold border-2 bg-gray-50"
                       value={formData.endereco}
                       onChange={e => setFormData({ ...formData, endereco: e.target.value })}
@@ -406,7 +500,7 @@ const App: React.FC = () => {
                 </div>
                 
                 <div id="map-container" className="w-full h-80 bg-gray-200 rounded-lg overflow-hidden border-2 border-gray-300 shadow-inner z-10 relative"></div>
-                <p className="text-[10px] text-gray-400 italic">Arraste o marcador para ajustar a localização exata.</p>
+                <p className="text-[10px] text-gray-400 italic">Arraste o marcador ou use o GPS para ajustar a localização exata.</p>
               </div>
             </section>
 
