@@ -149,25 +149,25 @@ const App: React.FC = () => {
     if (!mapRef.current) {
       mapRef.current = L.map('map-container').setView([parseFloat(formData.latitude), parseFloat(formData.longitude)], 16);
       
-      // IMPORTANTE: crossOrigin: true é necessário para o html2canvas conseguir capturar a imagem do mapa
-      // Google Maps atualizado para HTTPS (mt1) para evitar bloqueios de conteúdo misto e problemas de CORS
+      // IMPORTANTE: Utilizando provedores que suportam CORS explicitamente (OpenStreetMap e Esri).
+      // O Google Maps (mt1.google.com) frequentemente bloqueia o acesso via Canvas (html2canvas) gerando erro de Tainted Canvas.
       const layers = {
-        street: L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        street: L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
           attribution: '&copy; OpenStreetMap contributors',
-          crossOrigin: true
+          crossOrigin: 'anonymous'
         }),
         satellite: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-          attribution: 'Esri &copy; Source: Esri, i-cubed, USDA, USGS',
-          crossOrigin: true
+          attribution: 'Tiles &copy; Esri',
+          crossOrigin: 'anonymous'
         }),
-        hybrid: L.tileLayer('https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',{
-            maxZoom: 20,
-            attribution: 'Map data &copy;2024 Google',
-            crossOrigin: true
+        // Usando Esri Satélite como base robusta para o híbrido para garantir o print
+        hybrid: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+            attribution: 'Tiles &copy; Esri',
+            crossOrigin: 'anonymous'
         })
       };
 
-      // Inicializa com Híbrido
+      // Inicializa com Híbrido (que agora é seguro para print)
       layers[mapType].addTo(mapRef.current);
       
       markerRef.current = L.marker([parseFloat(formData.latitude), parseFloat(formData.longitude)], { draggable: true }).addTo(mapRef.current);
@@ -269,15 +269,16 @@ const App: React.FC = () => {
         // Ao abrir o preview, tenta capturar a imagem do mapa atual
         const mapElement = document.getElementById('map-container');
         if (mapElement && (window as any).html2canvas) {
-            // Pequeno delay para garantir que os tiles do mapa foram renderizados após qualquer movimento
-            await new Promise(resolve => setTimeout(resolve, 800));
+            // Aumentando delay para 1s para garantir renderização dos tiles em mobile
+            await new Promise(resolve => setTimeout(resolve, 1000));
             
             try {
                 // Tira um print do elemento do mapa
                 const canvas = await (window as any).html2canvas(mapElement, {
                     useCORS: true, // ESSENCIAL: Permite carregar imagens de outros domínios
                     allowTaint: false, // ESSENCIAL: Deve ser falso para permitir toDataURL
-                    logging: false,
+                    proxy: null, // Desabilita proxy para evitar erros de requisição
+                    logging: true,
                     scale: 2, // Mantém resolução alta
                     backgroundColor: null,
                     ignoreElements: (element: any) => {
@@ -288,6 +289,7 @@ const App: React.FC = () => {
                 setMapSnapshot(canvas.toDataURL('image/png'));
             } catch (error) {
                 console.error("Erro ao capturar imagem do mapa:", error);
+                // Mesmo com erro, permite abrir o preview (sem o mapa)
                 setMapSnapshot(null);
             }
         }
