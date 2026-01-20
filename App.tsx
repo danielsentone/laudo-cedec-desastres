@@ -28,6 +28,7 @@ const App: React.FC = () => {
   // States para o Mapa
   const [mapSnapshot, setMapSnapshot] = useState<string | null>(null);
   const [isGeneratingMap, setIsGeneratingMap] = useState(false);
+  const [currentZoom, setCurrentZoom] = useState(18); // Zoom inicial padrão
   
   const mapRef = useRef<any>(null);
   const markerRef = useRef<any>(null);
@@ -122,12 +123,34 @@ const App: React.FC = () => {
           markerRef.current.on('dragend', (e: any) => {
               const { lat: dLat, lng: dLng } = e.target.getLatLng();
               updateCoords(dLat, dLng);
+              // Não chamamos fetchAddress aqui para não sobrescrever caso o usuário esteja editando, 
+              // mas para UX consistente com o clique, chamamos.
               fetchAddressFromCoords(dLat, dLng);
           });
       } else {
           // Apenas move se já existir
           markerRef.current.setLatLng([lat, lng]);
       }
+  };
+
+  // Handler para edição manual das coordenadas
+  const handleManualCoordChange = (field: 'latitude' | 'longitude', value: string) => {
+    setFormData(prev => ({ ...prev, [field]: value }));
+  };
+
+  // Handler para quando o usuário termina de digitar a coordenada (onBlur)
+  const handleManualCoordBlur = () => {
+    const lat = parseFloat(formData.latitude);
+    const lng = parseFloat(formData.longitude);
+
+    if (!isNaN(lat) && !isNaN(lng)) {
+        if (mapRef.current) {
+            setMarkerPosition(lat, lng);
+            // Mantém o zoom atual, apenas centraliza
+            mapRef.current.setView([lat, lng], currentZoom);
+            fetchAddressFromCoords(lat, lng);
+        }
+    }
   };
 
   const handleGetLocation = () => {
@@ -142,6 +165,8 @@ const App: React.FC = () => {
         
         if (mapRef.current) {
              mapRef.current.flyTo([latitude, longitude], 18, { animate: true, duration: 1.5 });
+             // Atualiza o zoom state para 18 pois o flyTo vai para 18
+             setCurrentZoom(18);
              setMarkerPosition(latitude, longitude);
         }
 
@@ -163,16 +188,6 @@ const App: React.FC = () => {
 
   // Helper para converter Blob em URL temporária
   const blobToUrl = (blob: Blob) => URL.createObjectURL(blob);
-
-  // Helper para converter Blob final em Base64
-  const blobToBase64String = (blob: Blob): Promise<string> => {
-      return new Promise((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(reader.result as string);
-          reader.onerror = reject;
-          reader.readAsDataURL(blob);
-      });
-  };
 
   // Helper para fundir duas imagens em um Canvas e retornar o Blob resultante
   const mergeImages = async (baseBlob: Blob, overlayBlob: Blob): Promise<Blob> => {
@@ -243,25 +258,23 @@ const App: React.FC = () => {
 
   // Função para gerar URL de imagem estática da Esri
   const fetchStaticMap = async (lat: number, lng: number): Promise<string | null> => {
-    // Delta ajustado para garantir legibilidade dos nomes de rua
-    const delta = 0.0030; 
-    const minX = lng - delta;
-    const minY = lat - delta;
-    const maxX = lng + delta;
-    const maxY = lat + delta;
+    // Cálculo do Delta com base no Zoom atual para garantir que o PDF tenha o mesmo visual da tela.
+    const deltaX = (800 * 360) / (256 * Math.pow(2, currentZoom));
+    const deltaY = (500 * 360) / (256 * Math.pow(2, currentZoom));
+    
+    // Calcula o Bounding Box (bbox) a partir do centro e dos deltas
+    const minX = lng - (deltaX / 2);
+    const maxX = lng + (deltaX / 2);
+    const minY = lat - (deltaY / 2);
+    const maxY = lat + (deltaY / 2);
+    
     const size = "800,500";
     const commonParams = `bbox=${minX},${minY},${maxX},${maxY}&bboxSR=4326&imageSR=4326&size=${size}&f=image`;
     
-    // URLs base dos serviços Esri
     const satUrl = `https://services.arcgisonline.com/arcgis/rest/services/World_Imagery/MapServer/export?${commonParams}`;
     const streetUrl = `https://services.arcgisonline.com/arcgis/rest/services/World_Street_Map/MapServer/export?${commonParams}`;
-    
-    // Camadas Transparentes para Overlay
     const transParams = `${commonParams}&format=png32&transparent=true`;
-    
-    // 1. World_Transportation: Traz as linhas de ruas e nomes de ruas (Crucial para parecer Google Maps)
     const transRefUrl = `https://services.arcgisonline.com/arcgis/rest/services/Reference/World_Transportation/MapServer/export?${transParams}`;
-    // 2. World_Boundaries_and_Places: Traz nomes de bairros, cidades e marcos
     const placesRefUrl = `https://services.arcgisonline.com/arcgis/rest/services/Reference/World_Boundaries_and_Places/MapServer/export?${transParams}`;
 
     try {
@@ -272,14 +285,10 @@ const App: React.FC = () => {
              if (!response.ok) throw new Error('Erro ao buscar mapa de ruas');
              finalBlob = await response.blob();
         } else {
-            // HÍBRIDO COMPLETO (Satélite + Ruas + Nomes)
-            
-            // 1. Busca imagem de satélite (Base)
             const satResponse = await fetch(satUrl);
             if (!satResponse.ok) throw new Error('Falha ao buscar imagem satélite');
             let currentBlob = await satResponse.blob();
 
-            // 2. Adiciona Camada de Transporte (Ruas)
             try {
                 const transResponse = await fetch(transRefUrl);
                 if (transResponse.ok) {
@@ -288,7 +297,6 @@ const App: React.FC = () => {
                 }
             } catch (e) { console.warn("Falha ao buscar camada transporte", e); }
 
-            // 3. Adiciona Camada de Lugares (Nomes/Labels)
             try {
                 const placesResponse = await fetch(placesRefUrl);
                 if (placesResponse.ok) {
@@ -301,7 +309,6 @@ const App: React.FC = () => {
         }
 
         if (finalBlob) {
-            // Adiciona o PIN antes de retornar
             return await addPinToImage(finalBlob);
         }
         return null;
@@ -314,40 +321,24 @@ const App: React.FC = () => {
 
   useEffect(() => {
     if (!mapRef.current) {
-      // Coordenadas padrão de inicialização (Curitiba), apenas para o View
       const defaultLat = -25.4284;
       const defaultLng = -49.2733;
+      const initialZoom = 14;
 
-      mapRef.current = L.map('map-container', { preferCanvas: true }).setView([defaultLat, defaultLng], 14);
-      
-      // Camada Street
-      const streetLayer = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { 
-        attribution: '&copy; OpenStreetMap', 
-        crossOrigin: 'anonymous' 
+      mapRef.current = L.map('map-container', { preferCanvas: true }).setView([defaultLat, defaultLng], initialZoom);
+      setCurrentZoom(initialZoom);
+
+      mapRef.current.on('zoomend', () => {
+        setCurrentZoom(mapRef.current.getZoom());
       });
       
-      // Camada Satélite Base
-      const satelliteLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { 
-        attribution: 'Tiles &copy; Esri', 
-        crossOrigin: 'anonymous' 
-      });
+      const streetLayer = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap', crossOrigin: 'anonymous' });
+      const satelliteLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution: 'Tiles &copy; Esri', crossOrigin: 'anonymous' });
 
-      // Camada Híbrida Completa (Satélite + Transporte + Lugares)
       const hybridLayer = L.layerGroup([
-        // 1. Satélite
-        L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { 
-            crossOrigin: 'anonymous' 
-        }),
-        // 2. Transporte (Ruas e Nomes de Ruas)
-        L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}', { 
-            crossOrigin: 'anonymous',
-            zIndex: 900 
-        }),
-        // 3. Fronteiras e Lugares (Nomes de Cidades/Bairros)
-        L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', { 
-            crossOrigin: 'anonymous',
-            zIndex: 1000
-        })
+        L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { crossOrigin: 'anonymous' }),
+        L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}', { crossOrigin: 'anonymous', zIndex: 900 }),
+        L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', { crossOrigin: 'anonymous', zIndex: 1000 })
       ]);
 
       (mapRef.current as any)._layers_options = {
@@ -359,7 +350,6 @@ const App: React.FC = () => {
       hybridLayer.addTo(mapRef.current);
       currentLayerRef.current = hybridLayer;
 
-      // Evento de Clique para Selecionar Localização
       mapRef.current.on('click', (e: any) => {
           const { lat, lng } = e.latlng;
           setMarkerPosition(lat, lng);
@@ -386,12 +376,9 @@ const App: React.FC = () => {
     }
   }, [mapType]);
 
-  // Atualização do Município - Apenas move a câmera, NÃO seleciona ponto
   useEffect(() => {
     const fetchCityCoords = async () => {
-      // SÓ EXECUTA SE O MUNICÍPIO EXISTIR NA LISTA OFICIAL (Evita busca enquanto digita)
       if (!formData.municipio || !MUNICIPIOS_PR.includes(formData.municipio)) return;
-
       try {
         const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(formData.municipio + ', Paraná, Brasil')}&limit=1`, {
              headers: { 'Accept-Language': 'pt-BR' }
@@ -404,15 +391,13 @@ const App: React.FC = () => {
           
           if (mapRef.current) {
               mapRef.current.setView([latNum, lngNum], 14);
+              setCurrentZoom(14); 
           }
-          // Nota: Não chamamos updateCoords nem fetchAddressFromCoords aqui
-          // para respeitar a regra de "só preencher mediante seleção no mapa".
         }
       } catch (error) {
           console.error("Erro ao buscar coordenadas da cidade", error);
       }
     };
-    
     if (mapRef.current) fetchCityCoords();
   }, [formData.municipio]);
 
@@ -456,54 +441,37 @@ const App: React.FC = () => {
     }));
   };
 
-  // --- Handlers para Inputs com Máscara e Validação onBlur ---
-
   const handleCpfChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = maskCPF(e.target.value);
     setFormData({ ...formData, cpfRequerente: val });
-    
-    // Remove erro enquanto digita se o usuário estiver corrigindo
-    if (cpfError && validateCPF(val)) {
-        setCpfError(false);
-    }
+    if (cpfError && validateCPF(val)) setCpfError(false);
   };
 
   const handleCpfBlur = (e: React.FocusEvent<HTMLInputElement>) => {
       const val = e.target.value;
-      // Se tiver algo preenchido, valida. Se estiver vazio, não marca erro (pode não ser obrigatório em algum contexto, mas se começou, tem que terminar)
-      if (val.length > 0 && !validateCPF(val)) {
-          setCpfError(true);
-      }
+      if (val.length > 0 && !validateCPF(val)) setCpfError(true);
   };
 
   const handleIncraChange = (e: React.ChangeEvent<HTMLInputElement>) => {
       const val = maskINCRA(e.target.value);
       setFormData({ ...formData, incra: val });
-      if (incraError && validateINCRA(val)) {
-          setIncraError(false);
-      }
+      if (incraError && validateINCRA(val)) setIncraError(false);
   };
 
   const handleIncraBlur = (e: React.FocusEvent<HTMLInputElement>) => {
       const val = e.target.value;
-      if (val.length > 0 && !validateINCRA(val)) {
-          setIncraError(true);
-      }
+      if (val.length > 0 && !validateINCRA(val)) setIncraError(true);
   };
 
   const handleMatriculaChange = (e: React.ChangeEvent<HTMLInputElement>) => {
       const val = maskMatricula(e.target.value);
       setFormData({ ...formData, matricula: val });
-      if (matriculaError && validateMatricula(val)) {
-          setMatriculaError(false);
-      }
+      if (matriculaError && validateMatricula(val)) setMatriculaError(false);
   };
 
   const handleMatriculaBlur = (e: React.FocusEvent<HTMLInputElement>) => {
       const val = e.target.value;
-      if (val.length > 0 && !validateMatricula(val)) {
-          setMatriculaError(true);
-      }
+      if (val.length > 0 && !validateMatricula(val)) setMatriculaError(true);
   };
 
 
@@ -518,7 +486,6 @@ const App: React.FC = () => {
             if (staticMap) {
                 setMapSnapshot(staticMap);
             } else {
-                // Fallback (HTML2Canvas) caso a API falhe, mas precisa do mapa visível
                 const mapElement = document.getElementById('map-container');
                 if (mapElement && (window as any).html2canvas) {
                     try {
@@ -538,23 +505,79 @@ const App: React.FC = () => {
     setShowPreview(!showPreview);
   };
 
-  const generatePDF = () => {
-    const element = document.getElementById('laudo-pdf-content');
-    const safeText = (text: string) => text ? text.replace(/[\/\\:*?"<>|]/g, '').trim() : '';
-    const municipio = safeText(formData.municipio) || 'Municipio';
-    const data = formData.data;
-    const proprietario = safeText(formData.proprietario) || 'Proprietario';
-    const filename = `${municipio}_${data}_${proprietario}.pdf`;
+  const generatePDF = async () => {
+    // Referências aos templates
+    const headerEl = document.getElementById('pdf-header-template');
+    const footerEl = document.getElementById('pdf-footer-template');
+    // Referência ao conteúdo
+    const contentEl = document.getElementById('laudo-content-body');
+    
+    if (!headerEl || !footerEl || !contentEl) {
+        alert("Erro ao gerar PDF: Elementos de template não encontrados.");
+        return;
+    }
 
-    const opt = {
-      margin: [10, 10, 10, 10], 
-      filename: filename,
-      image: { type: 'jpeg', quality: 0.98 },
-      html2canvas: { scale: 2, useCORS: true, letterRendering: true, scrollY: 0 },
-      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
-      pagebreak: { mode: ['avoid-all', 'css', 'legacy'] } 
-    };
-    html2pdf().set(opt).from(element).save();
+    try {
+        setIsGeneratingMap(true);
+
+        // 1. Captura os templates com dimensões fixas de A4 (794px = 210mm @ 96dpi aprox)
+        const headerCanvas = await html2canvas(headerEl, { 
+            scale: 2, 
+            useCORS: true, 
+            backgroundColor: '#ffffff',
+            width: 794,
+            windowWidth: 794 
+        });
+        const headerImg = headerCanvas.toDataURL('image/png');
+        
+        const footerCanvas = await html2canvas(footerEl, { 
+            scale: 2, 
+            useCORS: true, 
+            backgroundColor: '#ffffff',
+            width: 794,
+            windowWidth: 794 
+        });
+        const footerImg = footerCanvas.toDataURL('image/png');
+
+        // 2. Configuração do PDF
+        // Header height visual é ~40mm
+        // Footer height visual é ~25mm
+        // Margens [Topo, Direita, Base, Esquerda]
+        // Topo: 40mm para caber o header
+        // Base: 30mm para caber o footer
+        const opt = {
+          margin: [40, 10, 30, 10], 
+          filename: `Laudo_${formData.municipio || 'PR'}_${formData.data}.pdf`,
+          image: { type: 'jpeg', quality: 0.98 },
+          html2canvas: { scale: 2, useCORS: true, scrollY: 0, windowWidth: 794, width: 794 }, 
+          jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+          pagebreak: { mode: ['css', 'legacy'] } 
+        };
+
+        // 3. Gera o PDF do conteúdo e injeta o header/footer em CADA página
+        html2pdf().from(contentEl).set(opt).toPdf().get('pdf').then((pdf: any) => {
+            const totalPages = pdf.internal.getNumberOfPages();
+            const pageWidth = pdf.internal.pageSize.getWidth();
+            const pageHeight = pdf.internal.pageSize.getHeight();
+            
+            for (let i = 1; i <= totalPages; i++) {
+                pdf.setPage(i);
+                
+                // Injeta Cabeçalho (Topo) - Height 40mm
+                pdf.addImage(headerImg, 'PNG', 0, 0, pageWidth, 40);
+                
+                // Injeta Rodapé (Fundo) - Height 25mm
+                pdf.addImage(footerImg, 'PNG', 0, pageHeight - 25, pageWidth, 25);
+            }
+        }).save().then(() => {
+             setIsGeneratingMap(false);
+        });
+
+    } catch (e) {
+        console.error("Erro na geração do PDF:", e);
+        setIsGeneratingMap(false);
+        alert("Erro ao gerar o PDF. Tente novamente.");
+    }
   };
 
   const handleSaveEngenheiro = (eng: Engenheiro) => {
@@ -577,6 +600,37 @@ const App: React.FC = () => {
   return (
     <div className="bg-[#f2f2f2] min-h-screen font-sans">
       
+      {/* --- TEMPLATES OCULTOS PARA GERAÇÃO DE PDF (Z-Index negativo, fora do fluxo, largura fixa A4) --- */}
+      <div style={{ position: 'fixed', top: 0, left: 0, zIndex: -50, pointerEvents: 'none', visibility: 'visible' }}>
+         
+         {/* Template Cabeçalho - 794px (~210mm) */}
+         <div id="pdf-header-template" style={{ width: '794px', height: '150px' }} className="bg-white flex items-center justify-center relative">
+            <div className="absolute left-8 top-1/2 transform -translate-y-1/2">
+                 <img src={LOGO_PARANA_BASE64} alt="Brasão PR" style={{ height: '90px', width: 'auto' }} />
+            </div>
+            <div className="text-center w-full pl-32 pr-8">
+                <h2 className="font-black text-2xl uppercase text-black leading-none mb-1">Estado do Paraná</h2>
+                <h3 className="font-black text-xl uppercase text-black leading-none mb-1">Coordenadoria Estadual da Defesa Civil</h3>
+                <p className="font-bold text-sm uppercase text-black leading-none">Fundo Estadual para Calamidades Públicas</p>
+            </div>
+         </div>
+
+         {/* Template Rodapé - 794px (~210mm) */}
+         <div id="pdf-footer-template" style={{ width: '794px', height: '100px' }} className="bg-white flex flex-col justify-end pb-2">
+             <div className="w-full h-2 flex mb-2">
+                 <div className="bg-[#0038a8] w-[85%] h-full" style={{ clipPath: 'polygon(0 0, 100% 0, 98% 100%, 0% 100%)' }}></div>
+                 <div className="bg-[#009943] w-[15%] h-full ml-[-10px]" style={{ clipPath: 'polygon(20% 0, 100% 0, 100% 100%, 0% 100%)' }}></div>
+             </div>
+             <div className="text-center text-[10px] text-black font-bold px-8">
+                <p className="leading-tight">Palácio das Araucárias - 1º andar - Setor C | Centro Cívico | Curitiba/PR | CEP 80.530-140</p>
+                <p className="leading-tight">E-mail: defesacivil@defesacivil.pr.gov.br | Fone: (41) 3281-2500</p>
+                <p className="mt-1 font-black italic text-black text-[11px]">"Defesa Civil somos todos nós"</p>
+             </div>
+         </div>
+
+      </div>
+      {/* --- FIM TEMPLATES --- */}
+
       <div className="sticky top-0 z-30">
         <div className="bg-[#1e1e1e] text-white py-1 px-4 flex justify-between items-center text-xs">
           <span className="font-bold">PR.GOV.BR</span>
@@ -602,7 +656,7 @@ const App: React.FC = () => {
       </div>
 
       <main className="max-w-5xl mx-auto py-8 px-4">
-        
+        {/* Formulário Principal */}
         <div className="bg-white rounded-lg shadow-xl overflow-hidden border border-gray-200">
           <div className="p-6 md:p-10 space-y-10">
             
@@ -698,7 +752,6 @@ const App: React.FC = () => {
                     </>
                 )}
                 
-                {/* Requerente e CPF na mesma linha */}
                 <div className="space-y-1">
                     <label className="block text-xs font-bold text-gray-500 uppercase">Requerente</label>
                     <input type="text" className="w-full rounded border-gray-300 bg-white text-gray-900 shadow-sm focus:ring-[#f38b00] focus:border-[#f38b00] p-3 text-sm font-semibold border-2" value={formData.requerente} onChange={e => setFormData({ ...formData, requerente: e.target.value })} />
@@ -740,8 +793,26 @@ const App: React.FC = () => {
                      <input type="text" placeholder="Endereço Completo (Preenchimento Automático pelo Mapa ou GPS)" className="w-full rounded border-gray-300 bg-white text-gray-900 shadow-sm p-3 text-sm font-semibold border-2 bg-gray-50" value={formData.endereco} onChange={e => setFormData({ ...formData, endereco: e.target.value })} />
                    </div>
                    
-                   <div><label className="text-[10px] uppercase font-bold text-gray-400">Latitude</label><input type="text" readOnly className="w-full rounded bg-gray-100 border-gray-300 p-2 text-sm text-gray-700 font-mono border" value={formData.latitude} /></div>
-                   <div><label className="text-[10px] uppercase font-bold text-gray-400">Longitude</label><input type="text" readOnly className="w-full rounded bg-gray-100 border-gray-300 p-2 text-sm text-gray-700 font-mono border" value={formData.longitude} /></div>
+                   <div>
+                       <label className="text-[10px] uppercase font-bold text-gray-400">Latitude</label>
+                       <input 
+                           type="text" 
+                           className="w-full rounded bg-white border-gray-300 p-2 text-sm text-gray-700 font-mono border focus:ring-[#f38b00] focus:border-[#f38b00]" 
+                           value={formData.latitude} 
+                           onChange={(e) => handleManualCoordChange('latitude', e.target.value)}
+                           onBlur={handleManualCoordBlur}
+                       />
+                   </div>
+                   <div>
+                       <label className="text-[10px] uppercase font-bold text-gray-400">Longitude</label>
+                       <input 
+                           type="text" 
+                           className="w-full rounded bg-white border-gray-300 p-2 text-sm text-gray-700 font-mono border focus:ring-[#f38b00] focus:border-[#f38b00]" 
+                           value={formData.longitude} 
+                           onChange={(e) => handleManualCoordChange('longitude', e.target.value)}
+                           onBlur={handleManualCoordBlur}
+                       />
+                   </div>
                    
                    <div className="md:col-span-2 flex gap-2">
                         <button onClick={handleGetLocation} disabled={isLoadingLocation} className="flex-1 flex items-center justify-center gap-1 bg-[#f38b00] text-white px-3 py-2 rounded shadow text-xs font-bold hover:bg-orange-600 transition disabled:opacity-50 h-[38px]">
@@ -758,12 +829,12 @@ const App: React.FC = () => {
                 <div id="map-container" className="w-full h-[450px] bg-gray-200 rounded-lg overflow-hidden border-2 border-gray-300 shadow-inner z-10 relative"></div>
                 
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 mt-2 p-2 bg-orange-50 border border-orange-100 rounded">
-                     <p className="text-[10px] text-gray-500 italic">* Arraste o marcador no mapa para ajustar a localização exata.</p>
+                     <p className="text-[10px] text-gray-500 italic">* Arraste o marcador ou edite as coordenadas para ajustar a localização exata.</p>
                 </div>
               </div>
             </section>
 
-            {/* Seção 3 */}
+            {/* Seção 3 e 4 mantidas igual */}
             <section className="space-y-6">
               <div className="flex items-center gap-3 border-b border-gray-100 pb-2">
                 <span className="bg-[#f38b00] text-white w-8 h-8 flex items-center justify-center rounded-full font-bold">3</span>
@@ -805,7 +876,6 @@ const App: React.FC = () => {
               </div>
             </section>
 
-            {/* Seção 4 */}
             <section className="space-y-6">
               <div className="flex items-center gap-3 border-b border-gray-100 pb-2">
                 <span className="bg-[#f38b00] text-white w-8 h-8 flex items-center justify-center rounded-full font-bold">4</span>
@@ -827,7 +897,6 @@ const App: React.FC = () => {
               </div>
             </section>
 
-            {/* Ações */}
             <div className="pt-8 flex flex-col md:flex-row gap-4 border-t border-gray-200 mt-8">
               <button 
                 onClick={handleTogglePreview}
@@ -840,7 +909,7 @@ const App: React.FC = () => {
                   onClick={generatePDF}
                   className="flex-1 bg-[#f38b00] text-white font-black py-4 rounded uppercase text-sm tracking-widest hover:bg-orange-600 transition shadow-lg border-b-4 border-orange-700 active:border-b-0 active:translate-y-1"
                 >
-                  Baixar Laudo PDF
+                  {isGeneratingMap ? 'Gerando PDF...' : 'Baixar Laudo PDF'}
                 </button>
               )}
             </div>
@@ -854,7 +923,7 @@ const App: React.FC = () => {
              <div className="inline-block min-w-[21cm] mx-auto bg-white shadow-2xl">
                 {isGeneratingMap && !mapSnapshot ? (
                     <div className="p-12 text-center text-gray-500 font-bold uppercase animate-pulse">
-                        Buscando imagem aérea da localização...
+                        Processando dados do laudo...
                     </div>
                 ) : (
                     <LaudoPreview data={formData} engenheiro={currentEngenheiro} mapSnapshot={mapSnapshot} />
