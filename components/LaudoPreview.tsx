@@ -8,9 +8,10 @@ interface Props {
   data: LaudoData;
   engenheiro: Engenheiro | undefined;
   mapSnapshot: string | null;
+  isPrintMode?: boolean;
 }
 
-const LaudoPreview: React.FC<Props> = ({ data, engenheiro, mapSnapshot }) => {
+const LaudoPreview: React.FC<Props> = ({ data, engenheiro, mapSnapshot, isPrintMode = false }) => {
   const showVal = (val: string | undefined | null) => {
     if (!val || val.trim() === '') {
         return <span className="text-gray-400 italic font-normal">Não Fornecido/Identificado</span>;
@@ -18,23 +19,32 @@ const LaudoPreview: React.FC<Props> = ({ data, engenheiro, mapSnapshot }) => {
     return val;
   };
 
+  // Se estiver em modo de impressão (dentro do container oculto), remove padding e margens extras
+  // pois o html2canvas vai capturar o elemento exato
+  const containerClass = isPrintMode 
+      ? "bg-white font-sans text-xs text-gray-900 w-full h-full relative" 
+      : "bg-white p-[15mm] font-sans text-xs text-gray-900 w-[210mm] min-h-[297mm] mx-auto relative box-border";
+
   return (
-    <div id="laudo-preview-container" className="bg-white p-[15mm] font-sans text-xs text-gray-900 w-[210mm] min-h-[297mm] mx-auto relative box-border">
+    <div id="laudo-preview-container" className={containerClass}>
       
       {/* HEADER VISUAL (Sincronizado com PDF Template) */}
-      <div className="flex items-center justify-center relative mb-8 pt-4 pb-2" style={{ height: '150px' }}>
-         <div className="absolute left-0 top-1/2 transform -translate-y-1/2">
-            <img src={LOGO_PARANA_BASE64} alt="Brasão PR" style={{ height: '90px', width: 'auto' }} />
-         </div>
-         <div className="text-center w-full pl-32 pr-8">
-             <h2 className="font-black text-2xl uppercase text-black leading-none mb-1">Estado do Paraná</h2>
-             <h3 className="font-black text-xl uppercase text-black leading-none mb-1">Coordenadoria Estadual da Defesa Civil</h3>
-             <p className="font-bold text-sm uppercase text-black leading-none">Fundo Estadual para Calamidades Públicas</p>
-         </div>
-      </div>
+      {/* No modo PrintMode (PDF Real), não renderizamos este Header visual, pois ele é injetado pelo html2pdf como imagem */}
+      {!isPrintMode && (
+          <div className="flex items-center justify-center relative mb-8 pt-4 pb-2" style={{ height: '150px' }}>
+             <div className="absolute left-0 top-1/2 transform -translate-y-1/2">
+                <img src={LOGO_PARANA_BASE64} alt="Brasão PR" style={{ height: '90px', width: 'auto' }} />
+             </div>
+             <div className="text-center w-full pl-32 pr-8">
+                 <h2 className="font-black text-2xl uppercase text-black leading-none mb-1">Estado do Paraná</h2>
+                 <h3 className="font-black text-xl uppercase text-black leading-none mb-1">Coordenadoria Estadual da Defesa Civil</h3>
+                 <p className="font-bold text-sm uppercase text-black leading-none">Fundo Estadual para Calamidades Públicas</p>
+             </div>
+          </div>
+      )}
 
       {/* CONTEÚDO PRINCIPAL (Alvo do PDF) */}
-      <div id="laudo-content-body">
+      <div id={isPrintMode ? "print-content-inner" : "laudo-content-body"} className={isPrintMode ? "p-[15mm]" : ""}>
           
           {/* TITULO */}
           <div className="text-center mb-10">
@@ -169,17 +179,20 @@ const LaudoPreview: React.FC<Props> = ({ data, engenheiro, mapSnapshot }) => {
       </div>
 
       {/* FOOTER VISUAL (Sincronizado com PDF Template) */}
-      <div className="flex flex-col justify-end pb-2 mt-16" style={{ height: '100px' }}>
-         <div className="w-full h-2 flex mb-2">
-             <div className="bg-[#0038a8] w-[85%] h-full" style={{ clipPath: 'polygon(0 0, 100% 0, 98% 100%, 0% 100%)' }}></div>
-             <div className="bg-[#009943] w-[15%] h-full ml-[-10px]" style={{ clipPath: 'polygon(20% 0, 100% 0, 100% 100%, 0% 100%)' }}></div>
-         </div>
-         <div className="text-center text-[10px] text-black font-bold px-8">
-            <p className="leading-tight">Palácio das Araucárias - 1º andar - Setor C | Centro Cívico | Curitiba/PR | CEP 80.530-140</p>
-            <p className="leading-tight">E-mail: defesacivil@defesacivil.pr.gov.br | Fone: (41) 3281-2500</p>
-            <p className="mt-1 font-black italic text-black text-[11px]">"Defesa Civil somos todos nós"</p>
-         </div>
-      </div>
+      {/* No modo PrintMode (PDF Real), não renderizamos este Footer visual */}
+      {!isPrintMode && (
+          <div className="flex flex-col justify-end pb-2 mt-16" style={{ height: '100px' }}>
+             <div className="w-full h-2 flex mb-2">
+                 <div className="bg-[#0038a8] w-[85%] h-full" style={{ clipPath: 'polygon(0 0, 100% 0, 98% 100%, 0% 100%)' }}></div>
+                 <div className="bg-[#009943] w-[15%] h-full ml-[-10px]" style={{ clipPath: 'polygon(20% 0, 100% 0, 100% 100%, 0% 100%)' }}></div>
+             </div>
+             <div className="text-center text-[10px] text-black font-bold px-8">
+                <p className="leading-tight">Palácio das Araucárias - 1º andar - Setor C | Centro Cívico | Curitiba/PR | CEP 80.530-140</p>
+                <p className="leading-tight">E-mail: defesacivil@defesacivil.pr.gov.br | Fone: (41) 3281-2500</p>
+                <p className="mt-1 font-black italic text-black text-[11px]">"Defesa Civil somos todos nós"</p>
+             </div>
+          </div>
+      )}
 
     </div>
   );

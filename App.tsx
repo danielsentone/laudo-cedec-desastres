@@ -506,77 +506,66 @@ const App: React.FC = () => {
   };
 
   const generatePDF = async () => {
-    // Referências aos templates
-    const headerEl = document.getElementById('pdf-header-template');
-    const footerEl = document.getElementById('pdf-footer-template');
-    // Referência ao conteúdo
-    const contentEl = document.getElementById('laudo-content-body');
+    // Busca os elementos DEDICADOS para impressão (não os da tela)
+    const headerEl = document.getElementById('print-header-template');
+    const footerEl = document.getElementById('print-footer-template');
+    const contentEl = document.getElementById('print-content-body');
     
     if (!headerEl || !footerEl || !contentEl) {
-        alert("Erro ao gerar PDF: Elementos de template não encontrados.");
+        alert("Erro crítico: Elementos de impressão não encontrados.");
         return;
     }
 
     try {
-        setIsGeneratingMap(true);
+        setIsGeneratingMap(true); // Reutiliza este estado para indicar loading
 
-        // 1. Captura os templates com dimensões fixas de A4 (794px = 210mm @ 96dpi aprox)
-        const headerCanvas = await html2canvas(headerEl, { 
+        // Pequeno delay para garantir renderização no DOM
+        await new Promise(r => setTimeout(r, 500));
+
+        // 1. Captura os templates com configurações robustas para mobile
+        // windowWidth: 1024 é CRUCIAL para que o mobile renderize como desktop
+        const canvasOptions = {
             scale: 2, 
             useCORS: true, 
             backgroundColor: '#ffffff',
-            width: 794,
-            windowWidth: 794 
-        });
+            width: 794, // Largura A4 a 96dpi
+            windowWidth: 1200 // Simula desktop para evitar layouts mobile quebrados
+        };
+
+        const headerCanvas = await html2canvas(headerEl, canvasOptions);
         const headerImg = headerCanvas.toDataURL('image/png');
         
-        const footerCanvas = await html2canvas(footerEl, { 
-            scale: 2, 
-            useCORS: true, 
-            backgroundColor: '#ffffff',
-            width: 794,
-            windowWidth: 794 
-        });
+        const footerCanvas = await html2canvas(footerEl, canvasOptions);
         const footerImg = footerCanvas.toDataURL('image/png');
 
         // 2. Configuração do PDF
-        // Header height visual é ~40mm
-        // Footer height visual é ~25mm
-        // Margens [Topo, Direita, Base, Esquerda]
-        // Topo: 40mm para caber o header
-        // Base: 30mm para caber o footer
         const opt = {
           margin: [40, 10, 30, 10], 
           filename: `Laudo_${formData.municipio || 'PR'}_${formData.data}.pdf`,
-          image: { type: 'jpeg', quality: 0.98 },
-          html2canvas: { scale: 2, useCORS: true, scrollY: 0, windowWidth: 794, width: 794 }, 
+          image: { type: 'jpeg', quality: 0.95 },
+          html2canvas: { ...canvasOptions, scrollY: 0 }, 
           jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
           pagebreak: { mode: ['css', 'legacy'] } 
         };
 
-        // 3. Gera o PDF do conteúdo e injeta o header/footer em CADA página
-        html2pdf().from(contentEl).set(opt).toPdf().get('pdf').then((pdf: any) => {
+        // 3. Geração
+        await html2pdf().from(contentEl).set(opt).toPdf().get('pdf').then((pdf: any) => {
             const totalPages = pdf.internal.getNumberOfPages();
             const pageWidth = pdf.internal.pageSize.getWidth();
             const pageHeight = pdf.internal.pageSize.getHeight();
             
             for (let i = 1; i <= totalPages; i++) {
                 pdf.setPage(i);
-                
-                // Injeta Cabeçalho (Topo) - Height 40mm
                 pdf.addImage(headerImg, 'PNG', 0, 0, pageWidth, 40);
-                
-                // Injeta Rodapé (Fundo) - Height 25mm
                 pdf.addImage(footerImg, 'PNG', 0, pageHeight - 25, pageWidth, 25);
             }
-        }).save().then(() => {
-             setIsGeneratingMap(false);
-        });
+        }).save();
 
     } catch (e) {
         console.error("Erro na geração do PDF:", e);
+        alert("Erro ao gerar o PDF. Se estiver no celular, tente usar um computador.");
+    } finally {
         setIsGeneratingMap(false);
-        alert("Erro ao gerar o PDF. Tente novamente.");
     }
   };
 
@@ -600,11 +589,27 @@ const App: React.FC = () => {
   return (
     <div className="bg-[#f2f2f2] min-h-screen font-sans">
       
-      {/* --- TEMPLATES OCULTOS PARA GERAÇÃO DE PDF (Z-Index negativo, fora do fluxo, largura fixa A4) --- */}
-      <div style={{ position: 'fixed', top: 0, left: 0, zIndex: -50, pointerEvents: 'none', visibility: 'visible' }}>
-         
-         {/* Template Cabeçalho - 794px (~210mm) */}
-         <div id="pdf-header-template" style={{ width: '794px', height: '150px' }} className="bg-white flex items-center justify-center relative">
+      {/* --- CONTAINER DE IMPRESSÃO DEDICADO --- 
+          Este container existe sempre no DOM mas fora da visão.
+          Usamos z-index negativo e posicionamento absoluto.
+          NÃO usar display: none, pois html2canvas falha.
+      */}
+      <div 
+        id="print-container-root" 
+        style={{ 
+            position: 'absolute', 
+            top: 0, 
+            left: 0, 
+            width: '794px', // Largura fixa A4
+            zIndex: -9999, 
+            opacity: isGeneratingMap ? 1 : 0, // Truque: visível apenas durante geração se precisar debug, mas z-index esconde
+            pointerEvents: 'none',
+            overflow: 'hidden',
+            background: 'white'
+        }}
+      >
+         {/* 1. Header Template para Captura */}
+         <div id="print-header-template" style={{ width: '794px', height: '150px' }} className="bg-white flex items-center justify-center relative">
             <div className="absolute left-8 top-1/2 transform -translate-y-1/2">
                  <img src={LOGO_PARANA_BASE64} alt="Brasão PR" style={{ height: '90px', width: 'auto' }} />
             </div>
@@ -615,8 +620,8 @@ const App: React.FC = () => {
             </div>
          </div>
 
-         {/* Template Rodapé - 794px (~210mm) */}
-         <div id="pdf-footer-template" style={{ width: '794px', height: '100px' }} className="bg-white flex flex-col justify-end pb-2">
+         {/* 2. Footer Template para Captura */}
+         <div id="print-footer-template" style={{ width: '794px', height: '100px' }} className="bg-white flex flex-col justify-end pb-2">
              <div className="w-full h-2 flex mb-2">
                  <div className="bg-[#0038a8] w-[85%] h-full" style={{ clipPath: 'polygon(0 0, 100% 0, 98% 100%, 0% 100%)' }}></div>
                  <div className="bg-[#009943] w-[15%] h-full ml-[-10px]" style={{ clipPath: 'polygon(20% 0, 100% 0, 100% 100%, 0% 100%)' }}></div>
@@ -628,8 +633,20 @@ const App: React.FC = () => {
              </div>
          </div>
 
+         {/* 3. Corpo do Laudo para Captura 
+             Aqui renderizamos o LaudoPreview novamente, mas em modo "print" (sem header/footer visual duplicado, pois serão injetados)
+         */}
+         <div id="print-content-body">
+             <LaudoPreview 
+                data={formData} 
+                engenheiro={currentEngenheiro} 
+                mapSnapshot={mapSnapshot} 
+                isPrintMode={true} // Prop nova para controlar renderização
+             />
+         </div>
+
       </div>
-      {/* --- FIM TEMPLATES --- */}
+      {/* --- FIM CONTAINER IMPRESSÃO --- */}
 
       <div className="sticky top-0 z-30">
         <div className="bg-[#1e1e1e] text-white py-1 px-4 flex justify-between items-center text-xs">
