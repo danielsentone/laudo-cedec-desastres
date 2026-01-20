@@ -41,6 +41,7 @@ const App: React.FC = () => {
     incra: '',
     proprietario: '',
     requerente: '',
+    cpfRequerente: '',
     endereco: '',
     latitude: '-25.4290',
     longitude: '-49.2671',
@@ -441,7 +442,18 @@ const App: React.FC = () => {
                     </>
                 )}
                 <div className="space-y-1"><label className="block text-xs font-bold text-gray-500 uppercase">Proprietário</label><input type="text" className="w-full rounded border-gray-300 bg-white text-gray-900 shadow-sm focus:ring-[#f38b00] focus:border-[#f38b00] p-3 text-sm font-semibold border-2" value={formData.proprietario} onChange={e => setFormData({ ...formData, proprietario: e.target.value })} /></div>
-                <div className="space-y-1"><label className="block text-xs font-bold text-gray-500 uppercase">Requerente</label><input type="text" className="w-full rounded border-gray-300 bg-white text-gray-900 shadow-sm focus:ring-[#f38b00] focus:border-[#f38b00] p-3 text-sm font-semibold border-2" value={formData.requerente} onChange={e => setFormData({ ...formData, requerente: e.target.value })} /></div>
+                
+                <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-3 gap-6">
+                  <div className="md:col-span-2 space-y-1">
+                    <label className="block text-xs font-bold text-gray-500 uppercase">Requerente</label>
+                    <input type="text" className="w-full rounded border-gray-300 bg-white text-gray-900 shadow-sm focus:ring-[#f38b00] focus:border-[#f38b00] p-3 text-sm font-semibold border-2" value={formData.requerente} onChange={e => setFormData({ ...formData, requerente: e.target.value })} />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="block text-xs font-bold text-gray-500 uppercase">CPF do Requerente</label>
+                    <input type="text" placeholder="000.000.000-00" className="w-full rounded border-gray-300 bg-white text-gray-900 shadow-sm focus:ring-[#f38b00] focus:border-[#f38b00] p-3 text-sm font-semibold border-2" value={formData.cpfRequerente} onChange={e => setFormData({ ...formData, cpfRequerente: e.target.value })} />
+                  </div>
+                </div>
+
                 <div className="space-y-1"><label className="block text-xs font-bold text-gray-500 uppercase">Tipologia da Edificação</label>
                   <select className="w-full rounded border-gray-300 bg-white text-gray-900 shadow-sm focus:ring-[#f38b00] focus:border-[#f38b00] p-3 text-sm font-semibold border-2" value={formData.tipologia} onChange={e => setFormData({ ...formData, tipologia: e.target.value })}>
                     <option value="" disabled>Selecionar...</option>

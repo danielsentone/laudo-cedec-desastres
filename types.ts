@@ -15,6 +15,7 @@ export interface LaudoData {
   zona: 'Urbano' | 'Rural';
   proprietario: string;
   requerente: string;
+  cpfRequerente: string; // Novo campo
   endereco: string;
   latitude: string;
   longitude: string;
