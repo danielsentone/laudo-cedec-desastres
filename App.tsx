@@ -6,11 +6,16 @@ import EngenheiroModal from './components/EngenheiroModal';
 import LaudoPreview from './components/LaudoPreview';
 import { LOGO_DEFESA_CIVIL_BASE64, PIN_MARKER_BASE64, LOGO_PARANA_BASE64 } from './assets';
 
-// @ts-ignore
+declare global {
+  interface Window {
+    html2pdf: any;
+    html2canvas: any;
+    L: any;
+  }
+}
+
 const html2pdf = window.html2pdf;
-// @ts-ignore
 const html2canvas = window.html2canvas;
-// @ts-ignore
 const L = window.L;
 
 const App: React.FC = () => {
@@ -486,16 +491,18 @@ const App: React.FC = () => {
             if (staticMap) {
                 setMapSnapshot(staticMap);
             } else {
-                const mapElement = document.getElementById('map-container');
-                if (mapElement && (window as any).html2canvas) {
-                    try {
-                        const canvas = await (window as any).html2canvas(mapElement, {
-                            useCORS: true, allowTaint: false, logging: false, scale: 2,
+                // Tenta gerar snapshot do mapa apenas para visualização
+                // O html2canvas pode falhar em alguns contextos, então tratamos como opcional
+                try {
+                    const mapElement = document.getElementById('map-container');
+                    if (mapElement && window.html2canvas) {
+                        const canvas = await window.html2canvas(mapElement, {
+                            useCORS: true, allowTaint: false, logging: false, scale: 1,
                             ignoreElements: (element: any) => element.classList.contains('leaflet-control-zoom')
                         });
                         setMapSnapshot(canvas.toDataURL('image/png'));
-                    } catch (e) { console.error(e); }
-                }
+                    }
+                } catch (e) { console.error("Erro ao gerar snapshot local do mapa:", e); }
             }
             setIsGeneratingMap(false);
         } else {
@@ -511,8 +518,15 @@ const App: React.FC = () => {
     const footerEl = document.getElementById('print-footer-template');
     const contentEl = document.getElementById('print-content-body');
     
+    // Verificação robusta
     if (!headerEl || !footerEl || !contentEl) {
         alert("Erro crítico: Elementos de impressão não encontrados.");
+        return;
+    }
+    
+    // Verifica se html2canvas está carregado corretamente
+    if (!window.html2canvas) {
+        alert("Erro: Biblioteca de geração de imagem não carregada. Recarregue a página.");
         return;
     }
 
@@ -523,7 +537,7 @@ const App: React.FC = () => {
         await new Promise(r => setTimeout(r, 500));
 
         // 1. Captura os templates com configurações robustas para mobile
-        // windowWidth: 1024 é CRUCIAL para que o mobile renderize como desktop
+        // windowWidth: 1024 é CRUCIAL para que o mobile renderize como desktop e não quebre o layout
         const canvasOptions = {
             scale: 2, 
             useCORS: true, 
@@ -532,10 +546,10 @@ const App: React.FC = () => {
             windowWidth: 1200 // Simula desktop para evitar layouts mobile quebrados
         };
 
-        const headerCanvas = await html2canvas(headerEl, canvasOptions);
+        const headerCanvas = await window.html2canvas(headerEl, canvasOptions);
         const headerImg = headerCanvas.toDataURL('image/png');
         
-        const footerCanvas = await html2canvas(footerEl, canvasOptions);
+        const footerCanvas = await window.html2canvas(footerEl, canvasOptions);
         const footerImg = footerCanvas.toDataURL('image/png');
 
         // 2. Configuração do PDF
@@ -548,7 +562,7 @@ const App: React.FC = () => {
           pagebreak: { mode: ['css', 'legacy'] } 
         };
 
-        // 3. Geração
+        // 3. Geração usando html2pdf (promessa)
         await html2pdf().from(contentEl).set(opt).toPdf().get('pdf').then((pdf: any) => {
             const totalPages = pdf.internal.getNumberOfPages();
             const pageWidth = pdf.internal.pageSize.getWidth();
@@ -563,7 +577,7 @@ const App: React.FC = () => {
 
     } catch (e) {
         console.error("Erro na geração do PDF:", e);
-        alert("Erro ao gerar o PDF. Se estiver no celular, tente usar um computador.");
+        alert("Erro ao gerar o PDF. Se estiver no celular, tente usar um computador ou outro navegador.");
     } finally {
         setIsGeneratingMap(false);
     }
@@ -590,21 +604,20 @@ const App: React.FC = () => {
     <div className="bg-[#f2f2f2] min-h-screen font-sans">
       
       {/* --- CONTAINER DE IMPRESSÃO DEDICADO --- 
-          Este container existe sempre no DOM mas fora da visão.
-          Usamos z-index negativo e posicionamento absoluto.
-          NÃO usar display: none, pois html2canvas falha.
+          Este container existe sempre no DOM mas fora da tela.
+          Usamos position fixed e left muito negativo. 
+          NÃO usar display: none nem z-index negativo com posição relativa, pois html2canvas pode ignorar.
       */}
       <div 
         id="print-container-root" 
         style={{ 
-            position: 'absolute', 
+            position: 'fixed', 
             top: 0, 
-            left: 0, 
+            left: '-10000px', // Fora da tela, mas renderizado
             width: '794px', // Largura fixa A4
-            zIndex: -9999, 
-            opacity: isGeneratingMap ? 1 : 0, // Truque: visível apenas durante geração se precisar debug, mas z-index esconde
+            height: 'auto',
             pointerEvents: 'none',
-            overflow: 'hidden',
+            overflow: 'visible',
             background: 'white'
         }}
       >
@@ -633,9 +646,7 @@ const App: React.FC = () => {
              </div>
          </div>
 
-         {/* 3. Corpo do Laudo para Captura 
-             Aqui renderizamos o LaudoPreview novamente, mas em modo "print" (sem header/footer visual duplicado, pois serão injetados)
-         */}
+         {/* 3. Corpo do Laudo para Captura */}
          <div id="print-content-body">
              <LaudoPreview 
                 data={formData} 
