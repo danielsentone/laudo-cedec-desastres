@@ -4,7 +4,7 @@ import { LaudoData } from './types';
 import { getNivelDestruicao, getPercentualDestruicao, fileToBase64, maskCPF, validateCPF, maskINCRA, validateINCRA, maskMatricula, validateMatricula } from './utils';
 import EngenheiroModal from './components/EngenheiroModal';
 import LaudoPreview from './components/LaudoPreview';
-import { LOGO_DEFESA_CIVIL_BASE64, PIN_MARKER_BASE64 } from './assets';
+import { LOGO_DEFESA_CIVIL_BASE64, PIN_MARKER_BASE64, LOGO_PARANA_BASE64 } from './assets';
 
 // @ts-ignore
 const html2pdf = window.html2pdf;
@@ -587,14 +587,13 @@ const App: React.FC = () => {
 
         <header className="bg-white shadow-md border-b-4 border-[#f38b00]">
           <div className="max-w-7xl mx-auto p-4 flex justify-between items-center">
-              <div className="flex items-center gap-4">
-                  <img src={LOGO_DEFESA_CIVIL_BASE64} alt="Defesa Civil Paraná" className="h-14" />
+              <div className="flex items-end gap-6">
+                  <img src={LOGO_DEFESA_CIVIL_BASE64} alt="Defesa Civil Paraná" className="h-28" />
                   <div className="hidden md:flex flex-col">
-                    <span className="text-[#f38b00] font-black uppercase text-sm leading-tight">Defesa Civil</span>
-                    <span className="text-gray-500 font-semibold uppercase text-xs">Coordenadoria Estadual</span>
+                    <span className="text-black font-black uppercase text-3xl leading-none translate-y-[2px]">COORDENADORIA ESTADUAL DA DEFESA CIVIL</span>
                   </div>
               </div>
-              <div className="text-right">
+              <div className="text-right self-center">
                  <h1 className="text-lg md:text-xl font-black text-gray-700 uppercase">Laudo Técnico</h1>
                  <p className="text-xs text-gray-400">Sistema de Gestão de Desastres</p>
               </div>
@@ -873,10 +872,13 @@ const App: React.FC = () => {
       />
 
       <footer className="bg-[#1e1e1e] text-white py-8 border-t-4 border-[#f38b00]">
-        <div className="max-w-6xl mx-auto px-4 flex flex-col md:flex-row justify-between items-center gap-6">
-          <div className="text-center md:text-left">
-            <p className="font-black uppercase text-sm">Governo do Estado do Paraná</p>
-            <p className="text-xs text-gray-400">Defesa Civil - Coordenadoria Estadual</p>
+        <div className="max-w-7xl mx-auto px-4 flex flex-col md:flex-row justify-between items-center gap-8">
+          <div className="flex items-center gap-8">
+             <img src={LOGO_PARANA_BASE64} alt="Governo do Estado do Paraná" className="h-20 w-auto object-contain" />
+             <div className="text-left">
+                <p className="font-black uppercase text-3xl leading-none">Governo do Estado do Paraná</p>
+                <p className="text-sm text-gray-400 mt-1">Defesa Civil - Coordenadoria Estadual</p>
+             </div>
           </div>
           <div className="text-xs text-gray-500">
             &copy; {new Date().getFullYear()} Sistema de Laudos

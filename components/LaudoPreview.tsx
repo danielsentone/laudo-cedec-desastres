@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { LaudoData } from '../types';
 import { Engenheiro } from '../constants';
@@ -25,8 +26,8 @@ const LaudoPreview: React.FC<Props> = ({ data, engenheiro, mapSnapshot }) => {
       {/* HEADER */}
       <div className="flex justify-between items-start mb-8 border-b-2 border-gray-800 pb-6">
         <div className="flex items-center gap-4">
-            {/* Logo Paraná */}
-            <img src={LOGO_PARANA_BASE64} alt="Brasão PR" className="h-20" />
+            {/* Logo Paraná com crossOrigin para evitar Tainted Canvas se usar URL externa */}
+            <img src={LOGO_PARANA_BASE64} alt="Brasão PR" className="h-20 w-auto object-contain" />
             <div className="text-center">
                 <h2 className="font-bold text-sm uppercase">Estado do Paraná</h2>
                 <h3 className="font-bold text-xs uppercase">Coordenadoria Estadual da Defesa Civil</h3>
