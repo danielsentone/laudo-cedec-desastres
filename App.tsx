@@ -22,7 +22,9 @@ const App: React.FC = () => {
   
   // States para o Mapa
   const [mapSnapshot, setMapSnapshot] = useState<string | null>(null);
-  const [manualMapImage, setManualMapImage] = useState<string | null>(null); // Novo estado para upload manual
+  const [manualMapImage, setManualMapImage] = useState<string | null>(null); 
+  const [isGeneratingMap, setIsGeneratingMap] = useState(false);
+  
   const mapRef = useRef<any>(null);
   const markerRef = useRef<any>(null);
   
@@ -53,7 +55,6 @@ const App: React.FC = () => {
   // Função para buscar endereço a partir de coordenadas (Reverse Geocoding)
   const fetchAddressFromCoords = async (lat: number, lng: number) => {
     try {
-      // Adiciona timestamp para evitar cache
       const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&addressdetails=1&t=${Date.now()}`, {
         headers: {
             'Accept-Language': 'pt-BR'
@@ -63,29 +64,19 @@ const App: React.FC = () => {
       
       if (data && data.address) {
         const addr = data.address;
-        
-        // Prioridade de campos para logradouro
         const rua = addr.road || addr.street || addr.pedestrian || addr.path || addr.highway || addr.suburb || '';
-        
-        // Número: Se o mapa não tiver, usa 'S/N' como placeholder padrão de laudo, mas permite edição fácil
         const numero = addr.house_number || 'S/N';
-        
-        // Bairro: Expande busca para cidades menores (village, town, hamlet)
         const bairro = addr.neighbourhood || addr.suburb || addr.city_district || addr.village || addr.district || '';
-        
         const cep = addr.postcode || '';
         const cidade = addr.city || addr.town || addr.municipality || addr.village || '';
 
-        // Monta o endereço de forma estruturada: Rua, Número, Bairro - Cidade, CEP
         const parts = [];
-        
         if (rua) parts.push(rua);
-        parts.push(numero); // Sempre adiciona o número ou S/N na segunda posição
+        parts.push(numero); 
         if (bairro) parts.push(bairro);
         
         let fullAddress = parts.join(', ');
 
-        // Adiciona cidade se não estiver contida no nome da rua/bairro
         if (cidade && !fullAddress.includes(cidade)) {
             fullAddress += ` - ${cidade}`; 
         }
@@ -96,7 +87,6 @@ const App: React.FC = () => {
         
         setFormData(prev => ({ ...prev, endereco: fullAddress }));
       } else {
-        // Fallback se a API não retornar endereço estruturado
         setFormData(prev => ({ ...prev, endereco: `Lat: ${lat}, Lon: ${lng} (Endereço não encontrado, preencha manualmente)` }));
       }
     } catch (error) {
@@ -104,75 +94,78 @@ const App: React.FC = () => {
     }
   };
 
-  // Função para pegar localização do GPS
   const handleGetLocation = () => {
     if (!navigator.geolocation) {
       alert("Geolocalização não é suportada pelo seu navegador.");
       return;
     }
-
     setIsLoadingLocation(true);
-
     navigator.geolocation.getCurrentPosition(
       (position) => {
         const { latitude, longitude } = position.coords;
-        
-        // 1. Atualiza formulário com coordenadas
         updateCoords(latitude, longitude);
-        
-        // 2. Atualiza Mapa (Visual)
         if (mapRef.current && markerRef.current) {
           const newLatLng = new L.LatLng(latitude, longitude);
-          // Usa flyTo para uma transição suave até a localização do usuário
-          mapRef.current.flyTo(newLatLng, 18, {
-             animate: true,
-             duration: 1.5
-          });
+          mapRef.current.flyTo(newLatLng, 18, { animate: true, duration: 1.5 });
           markerRef.current.setLatLng(newLatLng);
         }
-        
-        // 3. Busca o endereço correspondente à localização do GPS
         fetchAddressFromCoords(latitude, longitude);
-        
         setIsLoadingLocation(false);
       },
       (error) => {
         setIsLoadingLocation(false);
         let msg = "Erro ao obter localização.";
-        if (error.code === 1) msg = "Permissão de localização negada. Verifique as configurações do seu navegador.";
-        if (error.code === 2) msg = "Localização indisponível (Sinal GPS fraco).";
-        if (error.code === 3) msg = "Tempo limite esgotado ao buscar localização.";
+        if (error.code === 1) msg = "Permissão de localização negada.";
+        if (error.code === 2) msg = "Localização indisponível.";
+        if (error.code === 3) msg = "Tempo limite esgotado.";
         alert(msg);
       },
       { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
     );
   };
 
+  // Função para gerar URL de imagem estática da Esri (Sem API Key complexa)
+  const fetchStaticMap = async (lat: number, lng: number): Promise<string | null> => {
+    // Calcula um Bounding Box (caixa) ao redor do ponto central
+    // 0.0025 graus é aprox 250-300 metros, dando um bom zoom de casa/quarteirão
+    const delta = 0.0025; 
+    const minX = lng - delta;
+    const minY = lat - delta;
+    const maxX = lng + delta;
+    const maxY = lat + delta;
+    
+    // Serviço de Exportação REST do ArcGIS (World Imagery)
+    const url = `https://services.arcgisonline.com/arcgis/rest/services/World_Imagery/MapServer/export?bbox=${minX},${minY},${maxX},${maxY}&bboxSR=4326&imageSR=4326&size=800,500&f=image`;
+    
+    try {
+        const response = await fetch(url);
+        if (!response.ok) throw new Error('Falha ao buscar imagem');
+        const blob = await response.blob();
+        
+        // Converte Blob para Base64 para poder embutir no PDF
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.readAsDataURL(blob);
+            reader.onload = () => resolve(reader.result as string);
+            reader.onerror = error => reject(error);
+        });
+    } catch (e) {
+        console.error("Erro ao buscar mapa estático", e);
+        return null;
+    }
+  };
+
   useEffect(() => {
     if (!mapRef.current) {
-      mapRef.current = L.map('map-container', {
-        preferCanvas: true // Tenta renderizar em Canvas para facilitar o print
-      }).setView([parseFloat(formData.latitude), parseFloat(formData.longitude)], 16);
+      mapRef.current = L.map('map-container', { preferCanvas: true }).setView([parseFloat(formData.latitude), parseFloat(formData.longitude)], 16);
       
-      // IMPORTANTE: Utilizando provedores que suportam CORS explicitamente.
       const layers = {
-        street: L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-          attribution: '&copy; OpenStreetMap contributors',
-          crossOrigin: 'anonymous'
-        }),
-        satellite: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-          attribution: 'Tiles &copy; Esri',
-          crossOrigin: 'anonymous'
-        }),
-        hybrid: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-            attribution: 'Tiles &copy; Esri',
-            crossOrigin: 'anonymous'
-        })
+        street: L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap', crossOrigin: 'anonymous' }),
+        satellite: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution: 'Tiles &copy; Esri', crossOrigin: 'anonymous' }),
+        hybrid: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution: 'Tiles &copy; Esri', crossOrigin: 'anonymous' })
       };
 
-      // Inicializa com Híbrido
       layers[mapType].addTo(mapRef.current);
-      
       markerRef.current = L.marker([parseFloat(formData.latitude), parseFloat(formData.longitude)], { draggable: true }).addTo(mapRef.current);
 
       markerRef.current.on('dragend', (e: any) => {
@@ -280,31 +273,31 @@ const App: React.FC = () => {
 
   const handleTogglePreview = async () => {
     if (!showPreview) {
-        // Só tenta o snapshot automático se o usuário NÃO tiver enviado uma imagem manual
+        // Se não houver mapa manual, tenta buscar o mapa estático automaticamente
         if (!manualMapImage) {
-            const mapElement = document.getElementById('map-container');
-            if (mapElement && (window as any).html2canvas) {
-                // Delay para garantir renderização
-                await new Promise(resolve => setTimeout(resolve, 1000));
-                
-                try {
-                    const canvas = await (window as any).html2canvas(mapElement, {
-                        useCORS: true,
-                        allowTaint: false, 
-                        proxy: null,
-                        logging: true,
-                        scale: 2,
-                        backgroundColor: null,
-                        ignoreElements: (element: any) => {
-                            return element.classList.contains('leaflet-control-zoom');
-                        }
-                    });
-                    setMapSnapshot(canvas.toDataURL('image/png'));
-                } catch (error) {
-                    console.error("Erro ao capturar imagem do mapa:", error);
-                    setMapSnapshot(null);
+            setIsGeneratingMap(true);
+            const lat = parseFloat(formData.latitude);
+            const lng = parseFloat(formData.longitude);
+            
+            // Busca imagem aérea da Esri
+            const staticMap = await fetchStaticMap(lat, lng);
+            
+            if (staticMap) {
+                setMapSnapshot(staticMap);
+            } else {
+                // Fallback: Tenta snapshot do canvas se a API falhar (último recurso)
+                const mapElement = document.getElementById('map-container');
+                if (mapElement && (window as any).html2canvas) {
+                     try {
+                        const canvas = await (window as any).html2canvas(mapElement, {
+                            useCORS: true, allowTaint: false, logging: false, scale: 2,
+                            ignoreElements: (element: any) => element.classList.contains('leaflet-control-zoom')
+                        });
+                        setMapSnapshot(canvas.toDataURL('image/png'));
+                    } catch (e) { console.error(e); }
                 }
             }
+            setIsGeneratingMap(false);
         }
     }
     setShowPreview(!showPreview);
@@ -322,16 +315,10 @@ const App: React.FC = () => {
       margin: [10, 10, 10, 10], 
       filename: filename,
       image: { type: 'jpeg', quality: 0.98 },
-      html2canvas: { 
-        scale: 2, 
-        useCORS: true, 
-        letterRendering: true,
-        scrollY: 0,
-      },
+      html2canvas: { scale: 2, useCORS: true, letterRendering: true, scrollY: 0 },
       jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
       pagebreak: { mode: ['avoid-all', 'css', 'legacy'] } 
     };
-    
     html2pdf().set(opt).from(element).save();
   };
 
@@ -366,24 +353,14 @@ const App: React.FC = () => {
         <header className="bg-white shadow-md border-b-4 border-[#f38b00]">
           <div className="max-w-7xl mx-auto p-4 flex justify-between items-center">
               <div className="flex items-center gap-4">
-                  <img 
-                      src={LOGO_DEFESA_CIVIL_BASE64}
-                      alt="Defesa Civil Paraná" 
-                      className="h-14" 
-                  />
+                  <img src={LOGO_DEFESA_CIVIL_BASE64} alt="Defesa Civil Paraná" className="h-14" />
                   <div className="hidden md:flex flex-col">
-                    <span className="text-[#f38b00] font-black uppercase text-sm leading-tight">
-                        Defesa Civil
-                    </span>
-                    <span className="text-gray-500 font-semibold uppercase text-xs">
-                        Coordenadoria Estadual
-                    </span>
+                    <span className="text-[#f38b00] font-black uppercase text-sm leading-tight">Defesa Civil</span>
+                    <span className="text-gray-500 font-semibold uppercase text-xs">Coordenadoria Estadual</span>
                   </div>
               </div>
               <div className="text-right">
-                 <h1 className="text-lg md:text-xl font-black text-gray-700 uppercase">
-                    Laudo Técnico
-                 </h1>
+                 <h1 className="text-lg md:text-xl font-black text-gray-700 uppercase">Laudo Técnico</h1>
                  <p className="text-xs text-gray-400">Sistema de Gestão de Desastres</p>
               </div>
           </div>
@@ -405,58 +382,26 @@ const App: React.FC = () => {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="space-y-1">
                   <label className="block text-xs font-bold text-gray-500 uppercase">Município do Paraná</label>
-                  <input 
-                    list="municipios-list"
-                    className="w-full rounded border-gray-300 bg-white text-gray-900 shadow-sm focus:ring-[#f38b00] focus:border-[#f38b00] p-3 text-sm font-semibold border-2"
-                    value={formData.municipio}
-                    onChange={e => setFormData({ ...formData, municipio: e.target.value })}
-                    placeholder="Digite para buscar..."
-                  />
-                  <datalist id="municipios-list">
-                    {MUNICIPIOS_PR.map(m => <option key={m} value={m} />)}
-                  </datalist>
+                  <input list="municipios-list" className="w-full rounded border-gray-300 bg-white text-gray-900 shadow-sm focus:ring-[#f38b00] focus:border-[#f38b00] p-3 text-sm font-semibold border-2" value={formData.municipio} onChange={e => setFormData({ ...formData, municipio: e.target.value })} placeholder="Digite para buscar..." />
+                  <datalist id="municipios-list">{MUNICIPIOS_PR.map(m => <option key={m} value={m} />)}</datalist>
                 </div>
                 <div className="space-y-1">
                   <label className="block text-xs font-bold text-gray-500 uppercase">Data do Levantamento</label>
-                  <input
-                    type="date"
-                    readOnly
-                    className="w-full rounded border-gray-300 bg-gray-100 text-gray-500 cursor-not-allowed shadow-sm p-3 text-sm font-semibold border-2"
-                    value={formData.data}
-                  />
+                  <input type="date" readOnly className="w-full rounded border-gray-300 bg-gray-100 text-gray-500 cursor-not-allowed shadow-sm p-3 text-sm font-semibold border-2" value={formData.data} />
                 </div>
               </div>
 
               <div className="bg-orange-50 p-4 rounded-lg border-2 border-dashed border-orange-200">
                 <div className="flex flex-col sm:flex-row sm:items-end justify-between mb-3 gap-2">
                   <label className="block text-xs font-bold text-[#f38b00] uppercase">Engenheiro Responsável</label>
-                  <button 
-                    onClick={() => { setEditingEng(null); setIsEngModalOpen(true); }}
-                    className="text-[10px] bg-[#f38b00] text-white px-3 py-2 rounded-full hover:bg-orange-600 transition uppercase font-bold self-start sm:self-auto"
-                  >
-                    + Novo Engenheiro
-                  </button>
+                  <button onClick={() => { setEditingEng(null); setIsEngModalOpen(true); }} className="text-[10px] bg-[#f38b00] text-white px-3 py-2 rounded-full hover:bg-orange-600 transition uppercase font-bold self-start sm:self-auto">+ Novo Engenheiro</button>
                 </div>
                 <div className="flex flex-col sm:flex-row gap-2">
-                  <select
-                    className="flex-1 rounded border-gray-300 bg-white text-gray-900 shadow-sm p-3 text-sm font-bold border-2 focus:border-[#f38b00] focus:ring-[#f38b00]"
-                    value={formData.engenheiroId}
-                    onChange={e => setFormData({ ...formData, engenheiroId: e.target.value })}
-                  >
+                  <select className="flex-1 rounded border-gray-300 bg-white text-gray-900 shadow-sm p-3 text-sm font-bold border-2 focus:border-[#f38b00] focus:ring-[#f38b00]" value={formData.engenheiroId} onChange={e => setFormData({ ...formData, engenheiroId: e.target.value })}>
                     <option value="" disabled>Selecionar...</option>
-                    {engenheiros.map(eng => (
-                      <option key={eng.id} value={eng.id}>
-                        {eng.nome} - CREA {eng.creaEstado} {eng.creaNumero}
-                      </option>
-                    ))}
+                    {engenheiros.map(eng => (<option key={eng.id} value={eng.id}>{eng.nome} - CREA {eng.creaEstado} {eng.creaNumero}</option>))}
                   </select>
-                  <button 
-                    onClick={() => { if(currentEngenheiro) { setEditingEng(currentEngenheiro); setIsEngModalOpen(true); } }}
-                    disabled={!currentEngenheiro}
-                    className="px-4 py-3 sm:py-2 bg-white text-gray-700 rounded text-xs font-bold hover:bg-gray-50 border-2 border-gray-300 disabled:opacity-50"
-                  >
-                    EDITAR
-                  </button>
+                  <button onClick={() => { if(currentEngenheiro) { setEditingEng(currentEngenheiro); setIsEngModalOpen(true); } }} disabled={!currentEngenheiro} className="px-4 py-3 sm:py-2 bg-white text-gray-700 rounded text-xs font-bold hover:bg-gray-50 border-2 border-gray-300 disabled:opacity-50">EDITAR</button>
                 </div>
               </div>
             </section>
@@ -471,131 +416,38 @@ const App: React.FC = () => {
               <div className="mb-6">
                 <label className="block text-xs font-bold text-gray-500 uppercase mb-3">Zona do Imóvel</label>
                 <div className="grid grid-cols-2 gap-4">
-                    <button
-                        onClick={() => setFormData({...formData, zona: 'Urbano'})}
-                        className={`group flex flex-col items-center justify-center p-4 rounded-lg border-2 transition-all duration-200 ${
-                            formData.zona === 'Urbano'
-                            ? 'border-[#f38b00] bg-orange-50 shadow-md'
-                            : 'border-gray-200 bg-white hover:border-orange-200 hover:bg-gray-50'
-                        }`}
-                    >
-                        <svg xmlns="http://www.w3.org/2000/svg" className={`h-8 w-8 mb-2 ${formData.zona === 'Urbano' ? 'text-[#f38b00]' : 'text-gray-400 group-hover:text-orange-300'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
-                        </svg>
+                    <button onClick={() => setFormData({...formData, zona: 'Urbano'})} className={`group flex flex-col items-center justify-center p-4 rounded-lg border-2 transition-all duration-200 ${formData.zona === 'Urbano' ? 'border-[#f38b00] bg-orange-50 shadow-md' : 'border-gray-200 bg-white hover:border-orange-200 hover:bg-gray-50'}`}>
+                        <svg xmlns="http://www.w3.org/2000/svg" className={`h-8 w-8 mb-2 ${formData.zona === 'Urbano' ? 'text-[#f38b00]' : 'text-gray-400 group-hover:text-orange-300'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" /></svg>
                         <span className={`text-sm font-black uppercase tracking-wider ${formData.zona === 'Urbano' ? 'text-gray-900' : 'text-gray-500'}`}>Urbano</span>
                     </button>
-
-                    <button
-                        onClick={() => setFormData({...formData, zona: 'Rural'})}
-                        className={`group flex flex-col items-center justify-center p-4 rounded-lg border-2 transition-all duration-200 ${
-                            formData.zona === 'Rural'
-                            ? 'border-[#f38b00] bg-orange-50 shadow-md'
-                            : 'border-gray-200 bg-white hover:border-orange-200 hover:bg-gray-50'
-                        }`}
-                    >
-                        <svg xmlns="http://www.w3.org/2000/svg" className={`h-8 w-8 mb-2 ${formData.zona === 'Rural' ? 'text-[#f38b00]' : 'text-gray-400 group-hover:text-orange-300'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                        </svg>
+                    <button onClick={() => setFormData({...formData, zona: 'Rural'})} className={`group flex flex-col items-center justify-center p-4 rounded-lg border-2 transition-all duration-200 ${formData.zona === 'Rural' ? 'border-[#f38b00] bg-orange-50 shadow-md' : 'border-gray-200 bg-white hover:border-orange-200 hover:bg-gray-50'}`}>
+                        <svg xmlns="http://www.w3.org/2000/svg" className={`h-8 w-8 mb-2 ${formData.zona === 'Rural' ? 'text-[#f38b00]' : 'text-gray-400 group-hover:text-orange-300'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                         <span className={`text-sm font-black uppercase tracking-wider ${formData.zona === 'Rural' ? 'text-gray-900' : 'text-gray-500'}`}>Rural</span>
                     </button>
                 </div>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                
                 {formData.zona === 'Urbano' ? (
                     <>
-                        <div className="space-y-1">
-                          <label className="block text-xs font-bold text-gray-500 uppercase">Indicação Fiscal</label>
-                          <input
-                            type="text"
-                            placeholder="Ex: 00.00.000.0000.000"
-                            className="w-full rounded border-gray-300 bg-white text-gray-900 shadow-sm focus:ring-[#f38b00] focus:border-[#f38b00] p-3 text-sm font-semibold border-2"
-                            value={formData.indicacaoFiscal}
-                            onChange={e => setFormData({ ...formData, indicacaoFiscal: e.target.value })}
-                          />
-                        </div>
-                        <div className="space-y-1">
-                          <label className="block text-xs font-bold text-gray-500 uppercase">Inscrição Imobiliária</label>
-                          <input
-                            type="text"
-                            className="w-full rounded border-gray-300 bg-white text-gray-900 shadow-sm focus:ring-[#f38b00] focus:border-[#f38b00] p-3 text-sm font-semibold border-2"
-                            value={formData.inscricaoImobiliaria}
-                            onChange={e => setFormData({ ...formData, inscricaoImobiliaria: e.target.value })}
-                          />
-                        </div>
-                        <div className="space-y-1">
-                          <label className="block text-xs font-bold text-gray-500 uppercase">Matrícula</label>
-                          <input
-                            type="text"
-                            className="w-full rounded border-gray-300 bg-white text-gray-900 shadow-sm focus:ring-[#f38b00] focus:border-[#f38b00] p-3 text-sm font-semibold border-2"
-                            value={formData.matricula}
-                            onChange={e => setFormData({ ...formData, matricula: e.target.value })}
-                          />
-                        </div>
+                        <div className="space-y-1"><label className="block text-xs font-bold text-gray-500 uppercase">Indicação Fiscal</label><input type="text" placeholder="Ex: 00.00.000.0000.000" className="w-full rounded border-gray-300 bg-white text-gray-900 shadow-sm focus:ring-[#f38b00] focus:border-[#f38b00] p-3 text-sm font-semibold border-2" value={formData.indicacaoFiscal} onChange={e => setFormData({ ...formData, indicacaoFiscal: e.target.value })} /></div>
+                        <div className="space-y-1"><label className="block text-xs font-bold text-gray-500 uppercase">Inscrição Imobiliária</label><input type="text" className="w-full rounded border-gray-300 bg-white text-gray-900 shadow-sm focus:ring-[#f38b00] focus:border-[#f38b00] p-3 text-sm font-semibold border-2" value={formData.inscricaoImobiliaria} onChange={e => setFormData({ ...formData, inscricaoImobiliaria: e.target.value })} /></div>
+                        <div className="space-y-1"><label className="block text-xs font-bold text-gray-500 uppercase">Matrícula</label><input type="text" className="w-full rounded border-gray-300 bg-white text-gray-900 shadow-sm focus:ring-[#f38b00] focus:border-[#f38b00] p-3 text-sm font-semibold border-2" value={formData.matricula} onChange={e => setFormData({ ...formData, matricula: e.target.value })} /></div>
                     </>
                 ) : (
                     <>
-                        <div className="space-y-1">
-                          <label className="block text-xs font-bold text-gray-500 uppercase">NIRF (Receita Federal)</label>
-                          <input
-                            type="text"
-                            placeholder="Número do Imóvel na Receita Federal"
-                            className="w-full rounded border-gray-300 bg-white text-gray-900 shadow-sm focus:ring-[#f38b00] focus:border-[#f38b00] p-3 text-sm font-semibold border-2"
-                            value={formData.nirf}
-                            onChange={e => setFormData({ ...formData, nirf: e.target.value })}
-                          />
-                        </div>
-                        <div className="space-y-1">
-                          <label className="block text-xs font-bold text-gray-500 uppercase">INCRA (CCIR)</label>
-                          <input
-                            type="text"
-                            placeholder="Código do Imóvel Rural"
-                            className="w-full rounded border-gray-300 bg-white text-gray-900 shadow-sm focus:ring-[#f38b00] focus:border-[#f38b00] p-3 text-sm font-semibold border-2"
-                            value={formData.incra}
-                            onChange={e => setFormData({ ...formData, incra: e.target.value })}
-                          />
-                        </div>
+                        <div className="space-y-1"><label className="block text-xs font-bold text-gray-500 uppercase">NIRF (Receita Federal)</label><input type="text" placeholder="Número do Imóvel na Receita Federal" className="w-full rounded border-gray-300 bg-white text-gray-900 shadow-sm focus:ring-[#f38b00] focus:border-[#f38b00] p-3 text-sm font-semibold border-2" value={formData.nirf} onChange={e => setFormData({ ...formData, nirf: e.target.value })} /></div>
+                        <div className="space-y-1"><label className="block text-xs font-bold text-gray-500 uppercase">INCRA (CCIR)</label><input type="text" placeholder="Código do Imóvel Rural" className="w-full rounded border-gray-300 bg-white text-gray-900 shadow-sm focus:ring-[#f38b00] focus:border-[#f38b00] p-3 text-sm font-semibold border-2" value={formData.incra} onChange={e => setFormData({ ...formData, incra: e.target.value })} /></div>
                     </>
                 )}
-
-                <div className="space-y-1">
-                  <label className="block text-xs font-bold text-gray-500 uppercase">Proprietário</label>
-                  <input
-                    type="text"
-                    className="w-full rounded border-gray-300 bg-white text-gray-900 shadow-sm focus:ring-[#f38b00] focus:border-[#f38b00] p-3 text-sm font-semibold border-2"
-                    value={formData.proprietario}
-                    onChange={e => setFormData({ ...formData, proprietario: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="block text-xs font-bold text-gray-500 uppercase">Requerente</label>
-                  <input
-                    type="text"
-                    className="w-full rounded border-gray-300 bg-white text-gray-900 shadow-sm focus:ring-[#f38b00] focus:border-[#f38b00] p-3 text-sm font-semibold border-2"
-                    value={formData.requerente}
-                    onChange={e => setFormData({ ...formData, requerente: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="block text-xs font-bold text-gray-500 uppercase">Tipologia da Edificação</label>
-                  <select
-                    className="w-full rounded border-gray-300 bg-white text-gray-900 shadow-sm focus:ring-[#f38b00] focus:border-[#f38b00] p-3 text-sm font-semibold border-2"
-                    value={formData.tipologia}
-                    onChange={e => setFormData({ ...formData, tipologia: e.target.value })}
-                  >
+                <div className="space-y-1"><label className="block text-xs font-bold text-gray-500 uppercase">Proprietário</label><input type="text" className="w-full rounded border-gray-300 bg-white text-gray-900 shadow-sm focus:ring-[#f38b00] focus:border-[#f38b00] p-3 text-sm font-semibold border-2" value={formData.proprietario} onChange={e => setFormData({ ...formData, proprietario: e.target.value })} /></div>
+                <div className="space-y-1"><label className="block text-xs font-bold text-gray-500 uppercase">Requerente</label><input type="text" className="w-full rounded border-gray-300 bg-white text-gray-900 shadow-sm focus:ring-[#f38b00] focus:border-[#f38b00] p-3 text-sm font-semibold border-2" value={formData.requerente} onChange={e => setFormData({ ...formData, requerente: e.target.value })} /></div>
+                <div className="space-y-1"><label className="block text-xs font-bold text-gray-500 uppercase">Tipologia da Edificação</label>
+                  <select className="w-full rounded border-gray-300 bg-white text-gray-900 shadow-sm focus:ring-[#f38b00] focus:border-[#f38b00] p-3 text-sm font-semibold border-2" value={formData.tipologia} onChange={e => setFormData({ ...formData, tipologia: e.target.value })}>
                     <option value="" disabled>Selecionar...</option>
                     {TIPOLOGIAS.map(t => <option key={t} value={t}>{t}</option>)}
                   </select>
-                  {formData.tipologia === 'Outro' && (
-                    <input
-                      type="text"
-                      placeholder="Descreva a tipologia..."
-                      className="mt-2 w-full rounded border-gray-300 bg-white shadow-sm p-3 text-sm border-2 italic"
-                      value={formData.tipologiaOutro}
-                      onChange={e => setFormData({ ...formData, tipologiaOutro: e.target.value })}
-                    />
-                  )}
+                  {formData.tipologia === 'Outro' && (<input type="text" placeholder="Descreva a tipologia..." className="mt-2 w-full rounded border-gray-300 bg-white shadow-sm p-3 text-sm border-2 italic" value={formData.tipologiaOutro} onChange={e => setFormData({ ...formData, tipologiaOutro: e.target.value })} />)}
                 </div>
               </div>
 
@@ -603,26 +455,10 @@ const App: React.FC = () => {
                 <div className="flex justify-between items-end flex-wrap gap-2">
                     <label className="block text-xs font-bold text-gray-500 uppercase">Localização (Mapa)</label>
                     <div className="flex gap-2 items-center">
-                        <button
-                          onClick={handleGetLocation}
-                          disabled={isLoadingLocation}
-                          className="flex items-center gap-1 bg-[#f38b00] text-white px-3 py-1 rounded shadow text-xs font-bold hover:bg-orange-600 transition disabled:opacity-50"
-                        >
-                          {isLoadingLocation ? 'Buscando...' : (
-                            <>
-                              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-                              </svg>
-                              Minha Localização
-                            </>
-                          )}
+                        <button onClick={handleGetLocation} disabled={isLoadingLocation} className="flex items-center gap-1 bg-[#f38b00] text-white px-3 py-1 rounded shadow text-xs font-bold hover:bg-orange-600 transition disabled:opacity-50">
+                          {isLoadingLocation ? 'Buscando...' : (<><svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" /></svg>Minha Localização</>)}
                         </button>
-                        <select 
-                            className="rounded border-gray-300 bg-white text-gray-900 p-1 text-xs font-bold border shadow-sm cursor-pointer"
-                            value={mapType}
-                            onChange={e => setMapType(e.target.value as any)}
-                        >
+                        <select className="rounded border-gray-300 bg-white text-gray-900 p-1 text-xs font-bold border shadow-sm cursor-pointer" value={mapType} onChange={e => setMapType(e.target.value as any)}>
                             <option value="hybrid">Híbrido</option>
                             <option value="satellite">Satélite</option>
                             <option value="street">Mapa</option>
@@ -632,45 +468,23 @@ const App: React.FC = () => {
                 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                    <div className="md:col-span-3">
-                     <input
-                      type="text"
-                      placeholder="Endereço Completo (Preenchimento Automático pelo Mapa ou GPS)"
-                      className="w-full rounded border-gray-300 bg-white text-gray-900 shadow-sm p-3 text-sm font-semibold border-2 bg-gray-50"
-                      value={formData.endereco}
-                      onChange={e => setFormData({ ...formData, endereco: e.target.value })}
-                    />
+                     <input type="text" placeholder="Endereço Completo (Preenchimento Automático pelo Mapa ou GPS)" className="w-full rounded border-gray-300 bg-white text-gray-900 shadow-sm p-3 text-sm font-semibold border-2 bg-gray-50" value={formData.endereco} onChange={e => setFormData({ ...formData, endereco: e.target.value })} />
                    </div>
-                   <div>
-                      <label className="text-[10px] uppercase font-bold text-gray-400">Latitude</label>
-                      <input type="text" readOnly className="w-full rounded bg-gray-100 border-gray-300 p-2 text-sm text-gray-700 font-mono border" value={formData.latitude} />
-                   </div>
-                   <div>
-                      <label className="text-[10px] uppercase font-bold text-gray-400">Longitude</label>
-                      <input type="text" readOnly className="w-full rounded bg-gray-100 border-gray-300 p-2 text-sm text-gray-700 font-mono border" value={formData.longitude} />
-                   </div>
+                   <div><label className="text-[10px] uppercase font-bold text-gray-400">Latitude</label><input type="text" readOnly className="w-full rounded bg-gray-100 border-gray-300 p-2 text-sm text-gray-700 font-mono border" value={formData.latitude} /></div>
+                   <div><label className="text-[10px] uppercase font-bold text-gray-400">Longitude</label><input type="text" readOnly className="w-full rounded bg-gray-100 border-gray-300 p-2 text-sm text-gray-700 font-mono border" value={formData.longitude} /></div>
                 </div>
                 
                 <div id="map-container" className="w-full h-80 bg-gray-200 rounded-lg overflow-hidden border-2 border-gray-300 shadow-inner z-10 relative"></div>
                 
-                {/* Opção de Upload Manual caso a captura automática falhe */}
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 mt-2 p-2 bg-orange-50 border border-orange-100 rounded">
-                     <p className="text-[10px] text-gray-500 italic">
-                       *Arraste o marcador no mapa para ajustar a localização exata.
-                     </p>
+                     <p className="text-[10px] text-gray-500 italic">* Arraste o marcador no mapa para ajustar a localização exata.</p>
                      <label className="text-[10px] bg-white border border-gray-300 text-blue-600 font-bold px-3 py-1 rounded cursor-pointer hover:bg-blue-50 hover:border-blue-300 flex items-center gap-2 shadow-sm whitespace-nowrap">
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
-                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
-                        </svg>
-                        {manualMapImage ? 'Imagem Anexada (Clique para alterar)' : 'Tirar Print e Anexar (Se o mapa automático falhar)'}
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                        {manualMapImage ? 'Imagem Manual Anexada (Alterar)' : 'Upload Manual de Print (Opcional)'}
                         <input type="file" accept="image/*" className="hidden" onChange={handleManualMapUpload} />
                      </label>
                 </div>
-                {manualMapImage && (
-                    <div className="text-[10px] text-green-600 font-bold mt-1 text-right">
-                        ✓ Imagem manual carregada com sucesso. Ela substituirá o mapa automático no laudo.
-                    </div>
-                )}
+                {manualMapImage && (<div className="text-[10px] text-green-600 font-bold mt-1 text-right">✓ Imagem manual carregada.</div>)}
               </div>
             </section>
 
@@ -680,23 +494,10 @@ const App: React.FC = () => {
                 <span className="bg-[#f38b00] text-white w-8 h-8 flex items-center justify-center rounded-full font-bold">3</span>
                 <h2 className="text-lg font-black text-gray-700 uppercase">Levantamento de Danos</h2>
               </div>
-              
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2">
                 {ITENS_DANOS.map(item => {
                   const isActive = formData.levantamentoDanos.some(d => d.tipo === item);
-                  return (
-                    <button
-                      key={item}
-                      onClick={() => handleDanoToggle(item)}
-                      className={`p-2 text-[10px] font-bold uppercase rounded border-2 transition text-center ${
-                        isActive 
-                          ? 'bg-[#f38b00] text-white border-[#f38b00] shadow-md transform scale-105' 
-                          : 'bg-white text-gray-500 border-gray-200 hover:border-[#f38b00] hover:text-[#f38b00]'
-                      }`}
-                    >
-                      {item}
-                    </button>
-                  );
+                  return (<button key={item} onClick={() => handleDanoToggle(item)} className={`p-2 text-[10px] font-bold uppercase rounded border-2 transition text-center ${isActive ? 'bg-[#f38b00] text-white border-[#f38b00] shadow-md transform scale-105' : 'bg-white text-gray-500 border-gray-200 hover:border-[#f38b00] hover:text-[#f38b00]'}`}>{item}</button>);
                 })}
               </div>
 
@@ -705,29 +506,16 @@ const App: React.FC = () => {
                   <div key={idx} className="bg-gray-50 p-5 rounded-lg border-l-4 border-[#f38b00] shadow-sm space-y-4 animate-fade-in">
                     <div className="flex justify-between items-center">
                       <h3 className="font-black text-gray-800 uppercase text-sm tracking-wider">{dano.tipo}</h3>
-                      <button 
-                        onClick={() => handleDanoToggle(dano.tipo)}
-                        className="text-red-500 hover:text-red-700 text-[10px] font-bold uppercase flex items-center gap-1"
-                      >
-                        Remover
-                      </button>
+                      <button onClick={() => handleDanoToggle(dano.tipo)} className="text-red-500 hover:text-red-700 text-[10px] font-bold uppercase flex items-center gap-1">Remover</button>
                     </div>
-                    <textarea
-                      placeholder={`Descreva os danos observados em ${dano.tipo}...`}
-                      className="w-full rounded border-gray-300 bg-white text-gray-900 shadow-sm p-3 h-24 text-sm border focus:ring-[#f38b00] focus:border-[#f38b00]"
-                      value={dano.descricao}
-                      onChange={e => handleDanoDescChange(dano.tipo, e.target.value)}
-                    />
+                    <textarea placeholder={`Descreva os danos observados em ${dano.tipo}...`} className="w-full rounded border-gray-300 bg-white text-gray-900 shadow-sm p-3 h-24 text-sm border focus:ring-[#f38b00] focus:border-[#f38b00]" value={dano.descricao} onChange={e => handleDanoDescChange(dano.tipo, e.target.value)} />
                     <div className="space-y-2">
                        <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest">Fotos</label>
                        <div className="flex flex-wrap gap-3">
                           {dano.fotos.map((foto, fIdx) => (
                             <div key={fIdx} className="relative group w-24 h-24">
                               <img src={foto} className="w-full h-full object-cover rounded border border-gray-200 shadow-sm" />
-                              <button 
-                                onClick={() => removeFoto(dano.tipo, fIdx)}
-                                className="absolute -top-2 -right-2 bg-red-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs shadow-md opacity-0 group-hover:opacity-100 transition"
-                              >✕</button>
+                              <button onClick={() => removeFoto(dano.tipo, fIdx)} className="absolute -top-2 -right-2 bg-red-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs shadow-md opacity-0 group-hover:opacity-100 transition">✕</button>
                             </div>
                           ))}
                           <label className="w-24 h-24 flex flex-col items-center justify-center border-2 border-dashed border-gray-300 rounded bg-white cursor-pointer hover:bg-gray-50 hover:border-[#f38b00] transition group">
@@ -751,11 +539,7 @@ const App: React.FC = () => {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="space-y-1">
                   <label className="block text-xs font-bold text-gray-500 uppercase">Parecer de Danos</label>                  
-                  <select
-                    className="w-full rounded border-gray-300 bg-white text-gray-900 shadow-sm p-4 text-sm font-black border-2 focus:ring-[#f38b00] focus:border-[#f38b00]"
-                    value={formData.classificacaoDanos}
-                    onChange={e => setFormData({ ...formData, classificacaoDanos: e.target.value })}
-                  >
+                  <select className="w-full rounded border-gray-300 bg-white text-gray-900 shadow-sm p-4 text-sm font-black border-2 focus:ring-[#f38b00] focus:border-[#f38b00]" value={formData.classificacaoDanos} onChange={e => setFormData({ ...formData, classificacaoDanos: e.target.value })}>
                     <option value="" disabled>Selecionar...</option>
                     {CLASSIFICACOES.map(c => <option key={c} value={c}>{c}</option>)}
                   </select>
@@ -793,8 +577,13 @@ const App: React.FC = () => {
         <div className="max-w-5xl mx-auto mb-20 px-4">
           <div className="bg-gray-300 p-4 md:p-8 rounded-lg overflow-x-auto shadow-inner border border-gray-400">
              <div className="inline-block min-w-[21cm] mx-auto bg-white shadow-2xl">
-                {/* Prioriza a imagem manual se existir, senão usa o snapshot automático */}
-                <LaudoPreview data={formData} engenheiro={currentEngenheiro} mapSnapshot={manualMapImage || mapSnapshot} />
+                {isGeneratingMap && !manualMapImage ? (
+                    <div className="p-12 text-center text-gray-500 font-bold uppercase animate-pulse">
+                        Buscando imagem aérea da localização...
+                    </div>
+                ) : (
+                    <LaudoPreview data={formData} engenheiro={currentEngenheiro} mapSnapshot={manualMapImage || mapSnapshot} />
+                )}
              </div>
           </div>
         </div>

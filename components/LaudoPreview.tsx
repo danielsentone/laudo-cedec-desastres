@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { LaudoData } from '../types';
 import { Engenheiro } from '../constants';
@@ -106,20 +105,20 @@ const LaudoPreview: React.FC<Props> = ({ data, engenheiro, mapSnapshot }) => {
       {/* MAPA */}
       <div className="mb-8 border-2 border-gray-300 p-1 flex justify-center items-center bg-gray-100 min-h-[200px] page-break-inside-avoid">
          <div className="text-center text-gray-400 w-full">
-            <p className="font-bold mb-2">LOCALIZAÇÃO GEORREFERENCIADA</p>
-            <div className="w-full bg-gray-200 flex items-center justify-center relative overflow-hidden">
+            <p className="font-bold mb-2 uppercase text-xs text-gray-500">Imagem Aérea de Satélite (Localização Georreferenciada)</p>
+            <div className="w-full flex items-center justify-center relative overflow-hidden">
                 {mapSnapshot ? (
-                    <div className="w-full h-auto">
-                        <img src={mapSnapshot} alt="Mapa da Localização" className="w-full h-auto object-contain" />
+                    <div className="w-full h-auto max-h-[400px]">
+                        <img src={mapSnapshot} alt="Imagem Aérea da Localização" className="w-full h-auto object-contain mx-auto" style={{ maxHeight: '400px' }} />
                     </div>
                 ) : (
-                    <div className="w-full h-64 flex flex-col items-center justify-center">
-                        <div className="text-6xl opacity-20">🗺️</div>
-                        <p className="text-[10px] mt-2">Mapa não disponível</p>
+                    <div className="w-full h-40 flex flex-col items-center justify-center bg-gray-200">
+                        <div className="text-4xl opacity-20">📡</div>
+                        <p className="text-[10px] mt-2">Imagem de satélite indisponível</p>
                     </div>
                 )}
             </div>
-            <div className="mt-2 text-[10px] text-gray-500">
+            <div className="mt-2 text-[10px] text-gray-500 font-mono">
                 Lat: {data.latitude} | Lon: {data.longitude}
             </div>
          </div>
