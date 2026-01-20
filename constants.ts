@@ -14,7 +14,7 @@ export const TIPOLOGIAS = [
 
 export const ITENS_DANOS = [
   "Cobertura", "Captação", "Instalação Elétrica", "Instalação Hidráulica", "Parede", 
-  "Muro", "Revestimento", "Poste", "Árvores", "Forro", "Fundação", "Pilar", "Viga", "Laje"
+  "Muro", "Revestimento", "Poste", "Árvores", "Forro", "Fundação", "Pilar", "Viga", "Laje", "Outros"
 ];
 
 export const CLASSIFICACOES = [

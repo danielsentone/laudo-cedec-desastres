@@ -67,7 +67,7 @@ const LaudoPreview: React.FC<Props> = ({ data, engenheiro, mapSnapshot }) => {
                         <p><span className="font-bold uppercase w-40 inline-block">Indicação Fiscal:</span> {showVal(data.indicacaoFiscal)}</p>
                     </div>
                     <div className="grid grid-cols-1">
-                        <p><span className="font-bold uppercase w-40 inline-block">Inscrição Imobiliária:</span> {showVal(data.inscricaoImobiliaria)}</p>
+                        <p><span className="font-bold uppercase w-40 inline-block">Inscrição Municipal:</span> {showVal(data.inscricaoMunicipal)}</p>
                     </div>
                     <div className="grid grid-cols-1">
                         <p><span className="font-bold uppercase w-40 inline-block">Matrícula:</span> {showVal(data.matricula)}</p>
@@ -113,12 +113,6 @@ const LaudoPreview: React.FC<Props> = ({ data, engenheiro, mapSnapshot }) => {
                 {mapSnapshot ? (
                     <div className="relative w-full h-auto max-h-[400px]">
                         <img src={mapSnapshot} alt="Imagem Aérea da Localização" className="w-full h-auto object-contain mx-auto" style={{ maxHeight: '400px' }} />
-                        {/* Marcador Central (Pin) */}
-                        <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-full -mt-1 pointer-events-none drop-shadow-lg">
-                           <svg xmlns="http://www.w3.org/2000/svg" className="h-10 w-10 text-red-600 drop-shadow-md" viewBox="0 0 24 24" fill="currentColor" stroke="#fff" strokeWidth="1.5">
-                              <path fillRule="evenodd" d="M11.54 22.351l.07.04.028.016a.76.76 0 00.723 0l.028-.015.071-.041a16.975 16.975 0 001.144-.742 19.58 19.58 0 002.683-2.282c1.944-1.99 3.963-4.98 3.963-8.827a8.25 8.25 0 00-16.5 0c0 3.846 2.02 6.837 3.963 8.827a19.58 19.58 0 002.682 2.282 16.975 16.975 0 001.145.742zM12 13.5a3 3 0 100-6 3 3 0 000 6z" clipRule="evenodd" />
-                           </svg>
-                        </div>
                     </div>
                 ) : (
                     <div className="w-full h-40 flex flex-col items-center justify-center bg-gray-200">

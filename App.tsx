@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { MUNICIPIOS_PR, TIPOLOGIAS, ITENS_DANOS, CLASSIFICACOES, ENGENHEIROS_INICIAIS, Engenheiro } from './constants';
 import { LaudoData } from './types';
-import { getNivelDestruicao, getPercentualDestruicao, fileToBase64 } from './utils';
+import { getNivelDestruicao, getPercentualDestruicao, fileToBase64, maskCPF, validateCPF, maskINCRA, validateINCRA, maskMatricula, validateMatricula } from './utils';
 import EngenheiroModal from './components/EngenheiroModal';
 import LaudoPreview from './components/LaudoPreview';
-import { LOGO_DEFESA_CIVIL_BASE64 } from './assets';
+import { LOGO_DEFESA_CIVIL_BASE64, PIN_MARKER_BASE64 } from './assets';
 
 // @ts-ignore
 const html2pdf = window.html2pdf;
@@ -20,13 +20,19 @@ const App: React.FC = () => {
   const [showPreview, setShowPreview] = useState(false);
   const [isLoadingLocation, setIsLoadingLocation] = useState(false);
   
+  // Estados de Erro de Validação
+  const [cpfError, setCpfError] = useState(false);
+  const [incraError, setIncraError] = useState(false);
+  const [matriculaError, setMatriculaError] = useState(false);
+  
   // States para o Mapa
   const [mapSnapshot, setMapSnapshot] = useState<string | null>(null);
-  const [manualMapImage, setManualMapImage] = useState<string | null>(null); 
   const [isGeneratingMap, setIsGeneratingMap] = useState(false);
   
   const mapRef = useRef<any>(null);
   const markerRef = useRef<any>(null);
+  // Mantém referência à camada atual para remoção correta
+  const currentLayerRef = useRef<any>(null);
   
   const [formData, setFormData] = useState<LaudoData>({
     id: Date.now(),
@@ -35,7 +41,7 @@ const App: React.FC = () => {
     engenheiroId: '',
     zona: 'Urbano', // Default
     indicacaoFiscal: '',
-    inscricaoImobiliaria: '',
+    inscricaoMunicipal: '',
     matricula: '',
     nirf: '',
     incra: '',
@@ -43,8 +49,9 @@ const App: React.FC = () => {
     requerente: '',
     cpfRequerente: '',
     endereco: '',
-    latitude: '-25.4290',
-    longitude: '-49.2671',
+    // Coordenadas iniciam vazias
+    latitude: '',
+    longitude: '',
     tipologia: '',
     tipologiaOutro: '',
     levantamentoDanos: [],
@@ -95,6 +102,34 @@ const App: React.FC = () => {
     }
   };
 
+  const updateCoords = (lat: number, lng: number) => {
+    setFormData(prev => ({
+      ...prev,
+      latitude: lat.toFixed(6),
+      longitude: lng.toFixed(6)
+    }));
+  };
+
+  // Helper para posicionar ou criar o marcador
+  const setMarkerPosition = (lat: number, lng: number) => {
+      if (!mapRef.current) return;
+
+      if (!markerRef.current) {
+          // Cria o marcador se não existir
+          markerRef.current = L.marker([lat, lng], { draggable: true }).addTo(mapRef.current);
+          
+          // Adiciona listener de arraste
+          markerRef.current.on('dragend', (e: any) => {
+              const { lat: dLat, lng: dLng } = e.target.getLatLng();
+              updateCoords(dLat, dLng);
+              fetchAddressFromCoords(dLat, dLng);
+          });
+      } else {
+          // Apenas move se já existir
+          markerRef.current.setLatLng([lat, lng]);
+      }
+  };
+
   const handleGetLocation = () => {
     if (!navigator.geolocation) {
       alert("Geolocalização não é suportada pelo seu navegador.");
@@ -104,12 +139,13 @@ const App: React.FC = () => {
     navigator.geolocation.getCurrentPosition(
       (position) => {
         const { latitude, longitude } = position.coords;
-        updateCoords(latitude, longitude);
-        if (mapRef.current && markerRef.current) {
-          const newLatLng = new L.LatLng(latitude, longitude);
-          mapRef.current.flyTo(newLatLng, 18, { animate: true, duration: 1.5 });
-          markerRef.current.setLatLng(newLatLng);
+        
+        if (mapRef.current) {
+             mapRef.current.flyTo([latitude, longitude], 18, { animate: true, duration: 1.5 });
+             setMarkerPosition(latitude, longitude);
         }
+
+        updateCoords(latitude, longitude);
         fetchAddressFromCoords(latitude, longitude);
         setIsLoadingLocation(false);
       },
@@ -125,31 +161,151 @@ const App: React.FC = () => {
     );
   };
 
-  // Função para gerar URL de imagem estática da Esri (Sem API Key complexa)
+  // Helper para converter Blob em URL temporária
+  const blobToUrl = (blob: Blob) => URL.createObjectURL(blob);
+
+  // Helper para converter Blob final em Base64
+  const blobToBase64String = (blob: Blob): Promise<string> => {
+      return new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
+      });
+  };
+
+  // Helper para fundir duas imagens em um Canvas e retornar o Blob resultante
+  const mergeImages = async (baseBlob: Blob, overlayBlob: Blob): Promise<Blob> => {
+    return new Promise((resolve, reject) => {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        const img1 = new Image();
+        const img2 = new Image();
+        
+        img1.onload = () => {
+            canvas.width = img1.width;
+            canvas.height = img1.height;
+            if (ctx) ctx.drawImage(img1, 0, 0);
+            
+            img2.onload = () => {
+                if (ctx) ctx.drawImage(img2, 0, 0);
+                canvas.toBlob(blob => {
+                    if (blob) resolve(blob);
+                    else reject(new Error("Canvas conversion failed"));
+                }, 'image/png');
+            };
+            img2.crossOrigin = "Anonymous";
+            img2.src = blobToUrl(overlayBlob);
+        };
+        img1.crossOrigin = "Anonymous";
+        img1.src = blobToUrl(baseBlob);
+    });
+  };
+
+  // Helper para adicionar o PIN (marcador) ao centro da imagem
+  const addPinToImage = async (mapBlob: Blob): Promise<string> => {
+      return new Promise((resolve) => {
+          const canvas = document.createElement('canvas');
+          const ctx = canvas.getContext('2d');
+          const mapImg = new Image();
+          const pinImg = new Image();
+
+          mapImg.onload = () => {
+              canvas.width = mapImg.width;
+              canvas.height = mapImg.height;
+              if (ctx) {
+                  // Desenha o mapa
+                  ctx.drawImage(mapImg, 0, 0);
+                  
+                  pinImg.onload = () => {
+                      // Configuração do Pin
+                      const pinWidth = 50; 
+                      const pinHeight = 50;
+                      // Centraliza horizontalmente e posiciona a ponta (base) no centro vertical
+                      const x = (canvas.width / 2) - (pinWidth / 2);
+                      const y = (canvas.height / 2) - (pinHeight); 
+                      
+                      // Sombra simples para destaque
+                      ctx.shadowColor = "rgba(0,0,0,0.5)";
+                      ctx.shadowBlur = 5;
+                      ctx.shadowOffsetX = 2;
+                      ctx.shadowOffsetY = 2;
+
+                      ctx.drawImage(pinImg, x, y, pinWidth, pinHeight);
+                      resolve(canvas.toDataURL('image/png'));
+                  };
+                  pinImg.src = PIN_MARKER_BASE64;
+              }
+          };
+          mapImg.src = blobToUrl(mapBlob);
+      });
+  };
+
+  // Função para gerar URL de imagem estática da Esri
   const fetchStaticMap = async (lat: number, lng: number): Promise<string | null> => {
-    // Calcula um Bounding Box (caixa) ao redor do ponto central
-    // 0.0025 graus é aprox 250-300 metros, dando um bom zoom de casa/quarteirão
-    const delta = 0.0025; 
+    // Delta ajustado para garantir legibilidade dos nomes de rua
+    const delta = 0.0030; 
     const minX = lng - delta;
     const minY = lat - delta;
     const maxX = lng + delta;
     const maxY = lat + delta;
+    const size = "800,500";
+    const commonParams = `bbox=${minX},${minY},${maxX},${maxY}&bboxSR=4326&imageSR=4326&size=${size}&f=image`;
     
-    // Serviço de Exportação REST do ArcGIS (World Imagery)
-    const url = `https://services.arcgisonline.com/arcgis/rest/services/World_Imagery/MapServer/export?bbox=${minX},${minY},${maxX},${maxY}&bboxSR=4326&imageSR=4326&size=800,500&f=image`;
+    // URLs base dos serviços Esri
+    const satUrl = `https://services.arcgisonline.com/arcgis/rest/services/World_Imagery/MapServer/export?${commonParams}`;
+    const streetUrl = `https://services.arcgisonline.com/arcgis/rest/services/World_Street_Map/MapServer/export?${commonParams}`;
     
+    // Camadas Transparentes para Overlay
+    const transParams = `${commonParams}&format=png32&transparent=true`;
+    
+    // 1. World_Transportation: Traz as linhas de ruas e nomes de ruas (Crucial para parecer Google Maps)
+    const transRefUrl = `https://services.arcgisonline.com/arcgis/rest/services/Reference/World_Transportation/MapServer/export?${transParams}`;
+    // 2. World_Boundaries_and_Places: Traz nomes de bairros, cidades e marcos
+    const placesRefUrl = `https://services.arcgisonline.com/arcgis/rest/services/Reference/World_Boundaries_and_Places/MapServer/export?${transParams}`;
+
     try {
-        const response = await fetch(url);
-        if (!response.ok) throw new Error('Falha ao buscar imagem');
-        const blob = await response.blob();
-        
-        // Converte Blob para Base64 para poder embutir no PDF
-        return new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.readAsDataURL(blob);
-            reader.onload = () => resolve(reader.result as string);
-            reader.onerror = error => reject(error);
-        });
+        let finalBlob: Blob | null = null;
+
+        if (mapType === 'street') {
+             const response = await fetch(streetUrl);
+             if (!response.ok) throw new Error('Erro ao buscar mapa de ruas');
+             finalBlob = await response.blob();
+        } else {
+            // HÍBRIDO COMPLETO (Satélite + Ruas + Nomes)
+            
+            // 1. Busca imagem de satélite (Base)
+            const satResponse = await fetch(satUrl);
+            if (!satResponse.ok) throw new Error('Falha ao buscar imagem satélite');
+            let currentBlob = await satResponse.blob();
+
+            // 2. Adiciona Camada de Transporte (Ruas)
+            try {
+                const transResponse = await fetch(transRefUrl);
+                if (transResponse.ok) {
+                    const transBlob = await transResponse.blob();
+                    currentBlob = await mergeImages(currentBlob, transBlob);
+                }
+            } catch (e) { console.warn("Falha ao buscar camada transporte", e); }
+
+            // 3. Adiciona Camada de Lugares (Nomes/Labels)
+            try {
+                const placesResponse = await fetch(placesRefUrl);
+                if (placesResponse.ok) {
+                    const placesBlob = await placesResponse.blob();
+                    currentBlob = await mergeImages(currentBlob, placesBlob);
+                }
+            } catch (e) { console.warn("Falha ao buscar camada lugares", e); }
+            
+            finalBlob = currentBlob;
+        }
+
+        if (finalBlob) {
+            // Adiciona o PIN antes de retornar
+            return await addPinToImage(finalBlob);
+        }
+        return null;
+
     } catch (e) {
         console.error("Erro ao buscar mapa estático", e);
         return null;
@@ -158,68 +314,107 @@ const App: React.FC = () => {
 
   useEffect(() => {
     if (!mapRef.current) {
-      mapRef.current = L.map('map-container', { preferCanvas: true }).setView([parseFloat(formData.latitude), parseFloat(formData.longitude)], 16);
+      // Coordenadas padrão de inicialização (Curitiba), apenas para o View
+      const defaultLat = -25.4284;
+      const defaultLng = -49.2733;
+
+      mapRef.current = L.map('map-container', { preferCanvas: true }).setView([defaultLat, defaultLng], 14);
       
-      const layers = {
-        street: L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap', crossOrigin: 'anonymous' }),
-        satellite: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution: 'Tiles &copy; Esri', crossOrigin: 'anonymous' }),
-        hybrid: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution: 'Tiles &copy; Esri', crossOrigin: 'anonymous' })
+      // Camada Street
+      const streetLayer = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { 
+        attribution: '&copy; OpenStreetMap', 
+        crossOrigin: 'anonymous' 
+      });
+      
+      // Camada Satélite Base
+      const satelliteLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { 
+        attribution: 'Tiles &copy; Esri', 
+        crossOrigin: 'anonymous' 
+      });
+
+      // Camada Híbrida Completa (Satélite + Transporte + Lugares)
+      const hybridLayer = L.layerGroup([
+        // 1. Satélite
+        L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { 
+            crossOrigin: 'anonymous' 
+        }),
+        // 2. Transporte (Ruas e Nomes de Ruas)
+        L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}', { 
+            crossOrigin: 'anonymous',
+            zIndex: 900 
+        }),
+        // 3. Fronteiras e Lugares (Nomes de Cidades/Bairros)
+        L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', { 
+            crossOrigin: 'anonymous',
+            zIndex: 1000
+        })
+      ]);
+
+      (mapRef.current as any)._layers_options = {
+        street: streetLayer,
+        satellite: satelliteLayer,
+        hybrid: hybridLayer
       };
 
-      layers[mapType].addTo(mapRef.current);
-      markerRef.current = L.marker([parseFloat(formData.latitude), parseFloat(formData.longitude)], { draggable: true }).addTo(mapRef.current);
+      hybridLayer.addTo(mapRef.current);
+      currentLayerRef.current = hybridLayer;
 
-      markerRef.current.on('dragend', (e: any) => {
-        const { lat, lng } = e.target.getLatLng();
-        updateCoords(lat, lng);
-        fetchAddressFromCoords(lat, lng);
-      });
-
+      // Evento de Clique para Selecionar Localização
       mapRef.current.on('click', (e: any) => {
-        const { lat, lng } = e.latlng;
-        markerRef.current.setLatLng([lat, lng]);
-        updateCoords(lat, lng);
-        fetchAddressFromCoords(lat, lng);
+          const { lat, lng } = e.latlng;
+          setMarkerPosition(lat, lng);
+          updateCoords(lat, lng);
+          fetchAddressFromCoords(lat, lng);
       });
-
-      (mapRef.current as any)._layers_cache = layers;
     }
   }, []);
 
   useEffect(() => {
-    if (mapRef.current) {
-      const layers = (mapRef.current as any)._layers_cache;
-      mapRef.current.eachLayer((layer: any) => {
-        if (layer instanceof L.TileLayer) mapRef.current.removeLayer(layer);
-      });
-      layers[mapType].addTo(mapRef.current);
+    if (mapRef.current && (mapRef.current as any)._layers_options) {
+      if (currentLayerRef.current) {
+        if (typeof currentLayerRef.current.remove === 'function') {
+             currentLayerRef.current.remove();
+        } else if (typeof currentLayerRef.current.removeFrom === 'function') {
+            mapRef.current.removeLayer(currentLayerRef.current);
+        }
+      }
+      const newLayer = (mapRef.current as any)._layers_options[mapType];
+      if (newLayer) {
+        newLayer.addTo(mapRef.current);
+        currentLayerRef.current = newLayer;
+      }
     }
   }, [mapType]);
 
+  // Atualização do Município - Apenas move a câmera, NÃO seleciona ponto
   useEffect(() => {
     const fetchCityCoords = async () => {
+      // SÓ EXECUTA SE O MUNICÍPIO EXISTIR NA LISTA OFICIAL (Evita busca enquanto digita)
+      if (!formData.municipio || !MUNICIPIOS_PR.includes(formData.municipio)) return;
+
       try {
-        if (!formData.municipio) return;
-        const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(formData.municipio + ', PR, Brasil')}&limit=1`);
+        const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(formData.municipio + ', Paraná, Brasil')}&limit=1`, {
+             headers: { 'Accept-Language': 'pt-BR' }
+        });
         const data = await response.json();
         if (data && data.length > 0) {
           const { lat, lon } = data[0];
-          mapRef.current.setView([lat, lon], 14);
-          markerRef.current.setLatLng([lat, lon]);
-          updateCoords(parseFloat(lat), parseFloat(lon));
+          const latNum = parseFloat(lat);
+          const lngNum = parseFloat(lon);
+          
+          if (mapRef.current) {
+              mapRef.current.setView([latNum, lngNum], 14);
+          }
+          // Nota: Não chamamos updateCoords nem fetchAddressFromCoords aqui
+          // para respeitar a regra de "só preencher mediante seleção no mapa".
         }
-      } catch (error) {}
+      } catch (error) {
+          console.error("Erro ao buscar coordenadas da cidade", error);
+      }
     };
+    
     if (mapRef.current) fetchCityCoords();
   }, [formData.municipio]);
-
-  const updateCoords = (lat: number, lng: number) => {
-    setFormData(prev => ({
-      ...prev,
-      latitude: lat.toFixed(6),
-      longitude: lng.toFixed(6)
-    }));
-  };
 
   const handleDanoToggle = (dano: string) => {
     setFormData(prev => {
@@ -261,35 +456,72 @@ const App: React.FC = () => {
     }));
   };
 
-  const handleManualMapUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-        try {
-            const base64 = await fileToBase64(e.target.files[0]);
-            setManualMapImage(base64);
-        } catch (error) {
-            console.error("Erro ao carregar mapa manual", error);
-        }
+  // --- Handlers para Inputs com Máscara e Validação onBlur ---
+
+  const handleCpfChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = maskCPF(e.target.value);
+    setFormData({ ...formData, cpfRequerente: val });
+    
+    // Remove erro enquanto digita se o usuário estiver corrigindo
+    if (cpfError && validateCPF(val)) {
+        setCpfError(false);
     }
   };
 
+  const handleCpfBlur = (e: React.FocusEvent<HTMLInputElement>) => {
+      const val = e.target.value;
+      // Se tiver algo preenchido, valida. Se estiver vazio, não marca erro (pode não ser obrigatório em algum contexto, mas se começou, tem que terminar)
+      if (val.length > 0 && !validateCPF(val)) {
+          setCpfError(true);
+      }
+  };
+
+  const handleIncraChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const val = maskINCRA(e.target.value);
+      setFormData({ ...formData, incra: val });
+      if (incraError && validateINCRA(val)) {
+          setIncraError(false);
+      }
+  };
+
+  const handleIncraBlur = (e: React.FocusEvent<HTMLInputElement>) => {
+      const val = e.target.value;
+      if (val.length > 0 && !validateINCRA(val)) {
+          setIncraError(true);
+      }
+  };
+
+  const handleMatriculaChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const val = maskMatricula(e.target.value);
+      setFormData({ ...formData, matricula: val });
+      if (matriculaError && validateMatricula(val)) {
+          setMatriculaError(false);
+      }
+  };
+
+  const handleMatriculaBlur = (e: React.FocusEvent<HTMLInputElement>) => {
+      const val = e.target.value;
+      if (val.length > 0 && !validateMatricula(val)) {
+          setMatriculaError(true);
+      }
+  };
+
+
   const handleTogglePreview = async () => {
     if (!showPreview) {
-        // Se não houver mapa manual, tenta buscar o mapa estático automaticamente
-        if (!manualMapImage) {
+        const lat = parseFloat(formData.latitude);
+        const lng = parseFloat(formData.longitude);
+
+        if (!isNaN(lat) && !isNaN(lng)) {
             setIsGeneratingMap(true);
-            const lat = parseFloat(formData.latitude);
-            const lng = parseFloat(formData.longitude);
-            
-            // Busca imagem aérea da Esri
             const staticMap = await fetchStaticMap(lat, lng);
-            
             if (staticMap) {
                 setMapSnapshot(staticMap);
             } else {
-                // Fallback: Tenta snapshot do canvas se a API falhar (último recurso)
+                // Fallback (HTML2Canvas) caso a API falhe, mas precisa do mapa visível
                 const mapElement = document.getElementById('map-container');
                 if (mapElement && (window as any).html2canvas) {
-                     try {
+                    try {
                         const canvas = await (window as any).html2canvas(mapElement, {
                             useCORS: true, allowTaint: false, logging: false, scale: 2,
                             ignoreElements: (element: any) => element.classList.contains('leaflet-control-zoom')
@@ -299,6 +531,8 @@ const App: React.FC = () => {
                 }
             }
             setIsGeneratingMap(false);
+        } else {
+            setMapSnapshot(null);
         }
     }
     setShowPreview(!showPreview);
@@ -428,75 +662,105 @@ const App: React.FC = () => {
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-end">
                 {formData.zona === 'Urbano' ? (
                     <>
                         <div className="space-y-1"><label className="block text-xs font-bold text-gray-500 uppercase">Indicação Fiscal</label><input type="text" placeholder="Ex: 00.00.000.0000.000" className="w-full rounded border-gray-300 bg-white text-gray-900 shadow-sm focus:ring-[#f38b00] focus:border-[#f38b00] p-3 text-sm font-semibold border-2" value={formData.indicacaoFiscal} onChange={e => setFormData({ ...formData, indicacaoFiscal: e.target.value })} /></div>
-                        <div className="space-y-1"><label className="block text-xs font-bold text-gray-500 uppercase">Inscrição Imobiliária</label><input type="text" className="w-full rounded border-gray-300 bg-white text-gray-900 shadow-sm focus:ring-[#f38b00] focus:border-[#f38b00] p-3 text-sm font-semibold border-2" value={formData.inscricaoImobiliaria} onChange={e => setFormData({ ...formData, inscricaoImobiliaria: e.target.value })} /></div>
-                        <div className="space-y-1"><label className="block text-xs font-bold text-gray-500 uppercase">Matrícula</label><input type="text" className="w-full rounded border-gray-300 bg-white text-gray-900 shadow-sm focus:ring-[#f38b00] focus:border-[#f38b00] p-3 text-sm font-semibold border-2" value={formData.matricula} onChange={e => setFormData({ ...formData, matricula: e.target.value })} /></div>
+                        <div className="space-y-1"><label className="block text-xs font-bold text-gray-500 uppercase">Inscrição Municipal</label><input type="text" className="w-full rounded border-gray-300 bg-white text-gray-900 shadow-sm focus:ring-[#f38b00] focus:border-[#f38b00] p-3 text-sm font-semibold border-2" value={formData.inscricaoMunicipal} onChange={e => setFormData({ ...formData, inscricaoMunicipal: e.target.value })} /></div>
+                        <div className="space-y-1 md:col-span-2 relative">
+                            <label className="block text-xs font-bold text-gray-500 uppercase">Matrícula</label>
+                            <input 
+                                type="text" 
+                                className={`w-full rounded bg-white text-gray-900 shadow-sm p-3 text-sm font-semibold border-2 focus:ring-[#f38b00] focus:border-[#f38b00] ${matriculaError ? 'border-red-500 focus:border-red-500 focus:ring-red-500' : 'border-gray-300'}`}
+                                value={formData.matricula} 
+                                onChange={handleMatriculaChange}
+                                onBlur={handleMatriculaBlur} 
+                                placeholder="000000.0.0000000-00"
+                                maxLength={19}
+                            />
+                            {matriculaError && <span className="absolute right-2 top-8 text-[10px] text-red-600 font-bold bg-white px-1">Inválido/Incompleto</span>}
+                        </div>
                     </>
                 ) : (
                     <>
-                        <div className="space-y-1"><label className="block text-xs font-bold text-gray-500 uppercase">NIRF (Receita Federal)</label><input type="text" placeholder="Número do Imóvel na Receita Federal" className="w-full rounded border-gray-300 bg-white text-gray-900 shadow-sm focus:ring-[#f38b00] focus:border-[#f38b00] p-3 text-sm font-semibold border-2" value={formData.nirf} onChange={e => setFormData({ ...formData, nirf: e.target.value })} /></div>
-                        <div className="space-y-1"><label className="block text-xs font-bold text-gray-500 uppercase">INCRA (CCIR)</label><input type="text" placeholder="Código do Imóvel Rural" className="w-full rounded border-gray-300 bg-white text-gray-900 shadow-sm focus:ring-[#f38b00] focus:border-[#f38b00] p-3 text-sm font-semibold border-2" value={formData.incra} onChange={e => setFormData({ ...formData, incra: e.target.value })} /></div>
+                        <div className="space-y-1"><label className="block text-xs font-bold text-gray-500 uppercase">NIRF/CIB (Receita Federal)</label><input type="text" placeholder="Número do Imóvel na Receita Federal" className="w-full rounded border-gray-300 bg-white text-gray-900 shadow-sm focus:ring-[#f38b00] focus:border-[#f38b00] p-3 text-sm font-semibold border-2" value={formData.nirf} onChange={e => setFormData({ ...formData, nirf: e.target.value })} /></div>
+                        <div className="space-y-1 relative">
+                            <label className="block text-xs font-bold text-gray-500 uppercase">INCRA (CCIR)</label>
+                            <input 
+                                type="text" 
+                                placeholder="000.000.000.000-0" 
+                                className={`w-full rounded bg-white text-gray-900 shadow-sm p-3 text-sm font-semibold border-2 focus:ring-[#f38b00] focus:border-[#f38b00] ${incraError ? 'border-red-500 focus:border-red-500 focus:ring-red-500' : 'border-gray-300'}`} 
+                                value={formData.incra} 
+                                onChange={handleIncraChange}
+                                onBlur={handleIncraBlur} 
+                            />
+                            {incraError && <span className="absolute right-2 top-8 text-[10px] text-red-600 font-bold bg-white px-1">Inválido/Incompleto</span>}
+                        </div>
                     </>
                 )}
-                <div className="space-y-1"><label className="block text-xs font-bold text-gray-500 uppercase">Proprietário</label><input type="text" className="w-full rounded border-gray-300 bg-white text-gray-900 shadow-sm focus:ring-[#f38b00] focus:border-[#f38b00] p-3 text-sm font-semibold border-2" value={formData.proprietario} onChange={e => setFormData({ ...formData, proprietario: e.target.value })} /></div>
                 
-                <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-3 gap-6">
-                  <div className="md:col-span-2 space-y-1">
+                {/* Requerente e CPF na mesma linha */}
+                <div className="space-y-1">
                     <label className="block text-xs font-bold text-gray-500 uppercase">Requerente</label>
                     <input type="text" className="w-full rounded border-gray-300 bg-white text-gray-900 shadow-sm focus:ring-[#f38b00] focus:border-[#f38b00] p-3 text-sm font-semibold border-2" value={formData.requerente} onChange={e => setFormData({ ...formData, requerente: e.target.value })} />
-                  </div>
-                  <div className="space-y-1">
+                </div>
+                <div className="space-y-1 relative">
                     <label className="block text-xs font-bold text-gray-500 uppercase">CPF do Requerente</label>
-                    <input type="text" placeholder="000.000.000-00" className="w-full rounded border-gray-300 bg-white text-gray-900 shadow-sm focus:ring-[#f38b00] focus:border-[#f38b00] p-3 text-sm font-semibold border-2" value={formData.cpfRequerente} onChange={e => setFormData({ ...formData, cpfRequerente: e.target.value })} />
-                  </div>
+                    <input 
+                        type="text" 
+                        placeholder="000.000.000-00" 
+                        className={`w-full rounded bg-white text-gray-900 shadow-sm p-3 text-sm font-semibold border-2 focus:ring-[#f38b00] focus:border-[#f38b00] ${cpfError ? 'border-red-500 focus:border-red-500 focus:ring-red-500' : 'border-gray-300'}`} 
+                        value={formData.cpfRequerente} 
+                        onChange={handleCpfChange}
+                        onBlur={handleCpfBlur} 
+                    />
+                    {cpfError && <span className="absolute right-2 top-8 text-[10px] text-red-600 font-bold bg-white px-1">CPF Inválido</span>}
                 </div>
 
-                <div className="space-y-1"><label className="block text-xs font-bold text-gray-500 uppercase">Tipologia da Edificação</label>
+                <div className="space-y-1 md:col-span-2">
+                    <label className="block text-xs font-bold text-gray-500 uppercase">Proprietário</label>
+                    <input type="text" className="w-full rounded border-gray-300 bg-white text-gray-900 shadow-sm focus:ring-[#f38b00] focus:border-[#f38b00] p-3 text-sm font-semibold border-2" value={formData.proprietario} onChange={e => setFormData({ ...formData, proprietario: e.target.value })} />
+                </div>
+
+                <div className="space-y-1 md:col-span-2"><label className="block text-xs font-bold text-gray-500 uppercase">Tipologia da Edificação</label>
                   <select className="w-full rounded border-gray-300 bg-white text-gray-900 shadow-sm focus:ring-[#f38b00] focus:border-[#f38b00] p-3 text-sm font-semibold border-2" value={formData.tipologia} onChange={e => setFormData({ ...formData, tipologia: e.target.value })}>
                     <option value="" disabled>Selecionar...</option>
                     {TIPOLOGIAS.map(t => <option key={t} value={t}>{t}</option>)}
                   </select>
-                  {formData.tipologia === 'Outro' && (<input type="text" placeholder="Descreva a tipologia..." className="mt-2 w-full rounded border-gray-300 bg-white shadow-sm p-3 text-sm border-2 italic" value={formData.tipologiaOutro} onChange={e => setFormData({ ...formData, tipologiaOutro: e.target.value })} />)}
+                  {(formData.tipologia === 'Outro' || formData.tipologia === 'Equipamento Público') && (<input type="text" placeholder="Descreva a tipologia..." className="mt-2 w-full rounded border-gray-300 bg-white shadow-sm p-3 text-sm border-2 italic" value={formData.tipologiaOutro} onChange={e => setFormData({ ...formData, tipologiaOutro: e.target.value })} />)}
                 </div>
               </div>
 
               <div className="space-y-4 pt-4 border-t border-gray-100">
                 <div className="flex justify-between items-end flex-wrap gap-2">
-                    <label className="block text-xs font-bold text-gray-500 uppercase">Localização (Mapa)</label>
-                    <div className="flex gap-2 items-center">
-                        <button onClick={handleGetLocation} disabled={isLoadingLocation} className="flex items-center gap-1 bg-[#f38b00] text-white px-3 py-1 rounded shadow text-xs font-bold hover:bg-orange-600 transition disabled:opacity-50">
+                    <label className="block text-xs font-bold text-gray-500 uppercase">Endereço</label>
+                </div>
+                
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+                   <div className="md:col-span-4">
+                     <input type="text" placeholder="Endereço Completo (Preenchimento Automático pelo Mapa ou GPS)" className="w-full rounded border-gray-300 bg-white text-gray-900 shadow-sm p-3 text-sm font-semibold border-2 bg-gray-50" value={formData.endereco} onChange={e => setFormData({ ...formData, endereco: e.target.value })} />
+                   </div>
+                   
+                   <div><label className="text-[10px] uppercase font-bold text-gray-400">Latitude</label><input type="text" readOnly className="w-full rounded bg-gray-100 border-gray-300 p-2 text-sm text-gray-700 font-mono border" value={formData.latitude} /></div>
+                   <div><label className="text-[10px] uppercase font-bold text-gray-400">Longitude</label><input type="text" readOnly className="w-full rounded bg-gray-100 border-gray-300 p-2 text-sm text-gray-700 font-mono border" value={formData.longitude} /></div>
+                   
+                   <div className="md:col-span-2 flex gap-2">
+                        <button onClick={handleGetLocation} disabled={isLoadingLocation} className="flex-1 flex items-center justify-center gap-1 bg-[#f38b00] text-white px-3 py-2 rounded shadow text-xs font-bold hover:bg-orange-600 transition disabled:opacity-50 h-[38px]">
                           {isLoadingLocation ? 'Buscando...' : (<><svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" /></svg>Minha Localização</>)}
                         </button>
-                        <select className="rounded border-gray-300 bg-white text-gray-900 p-1 text-xs font-bold border shadow-sm cursor-pointer" value={mapType} onChange={e => setMapType(e.target.value as any)}>
+                        <select className="flex-1 rounded border-gray-300 bg-white text-gray-900 p-1 text-xs font-bold border shadow-sm cursor-pointer h-[38px]" value={mapType} onChange={e => setMapType(e.target.value as any)}>
                             <option value="hybrid">Híbrido</option>
                             <option value="satellite">Satélite</option>
                             <option value="street">Mapa</option>
                         </select>
-                    </div>
-                </div>
-                
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                   <div className="md:col-span-3">
-                     <input type="text" placeholder="Endereço Completo (Preenchimento Automático pelo Mapa ou GPS)" className="w-full rounded border-gray-300 bg-white text-gray-900 shadow-sm p-3 text-sm font-semibold border-2 bg-gray-50" value={formData.endereco} onChange={e => setFormData({ ...formData, endereco: e.target.value })} />
                    </div>
-                   <div><label className="text-[10px] uppercase font-bold text-gray-400">Latitude</label><input type="text" readOnly className="w-full rounded bg-gray-100 border-gray-300 p-2 text-sm text-gray-700 font-mono border" value={formData.latitude} /></div>
-                   <div><label className="text-[10px] uppercase font-bold text-gray-400">Longitude</label><input type="text" readOnly className="w-full rounded bg-gray-100 border-gray-300 p-2 text-sm text-gray-700 font-mono border" value={formData.longitude} /></div>
                 </div>
                 
-                <div id="map-container" className="w-full h-80 bg-gray-200 rounded-lg overflow-hidden border-2 border-gray-300 shadow-inner z-10 relative"></div>
+                <div id="map-container" className="w-full h-[450px] bg-gray-200 rounded-lg overflow-hidden border-2 border-gray-300 shadow-inner z-10 relative"></div>
                 
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 mt-2 p-2 bg-orange-50 border border-orange-100 rounded">
                      <p className="text-[10px] text-gray-500 italic">* Arraste o marcador no mapa para ajustar a localização exata.</p>
-                     <label className="text-[10px] bg-white border border-gray-300 text-blue-600 font-bold px-3 py-1 rounded cursor-pointer hover:bg-blue-50 hover:border-blue-300 flex items-center gap-2 shadow-sm whitespace-nowrap">
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
-                        {manualMapImage ? 'Imagem Manual Anexada (Alterar)' : 'Upload Manual de Print (Opcional)'}
-                        <input type="file" accept="image/*" className="hidden" onChange={handleManualMapUpload} />
-                     </label>
                 </div>
-                {manualMapImage && (<div className="text-[10px] text-green-600 font-bold mt-1 text-right">✓ Imagem manual carregada.</div>)}
               </div>
             </section>
 
@@ -589,12 +853,12 @@ const App: React.FC = () => {
         <div className="max-w-5xl mx-auto mb-20 px-4">
           <div className="bg-gray-300 p-4 md:p-8 rounded-lg overflow-x-auto shadow-inner border border-gray-400">
              <div className="inline-block min-w-[21cm] mx-auto bg-white shadow-2xl">
-                {isGeneratingMap && !manualMapImage ? (
+                {isGeneratingMap && !mapSnapshot ? (
                     <div className="p-12 text-center text-gray-500 font-bold uppercase animate-pulse">
                         Buscando imagem aérea da localização...
                     </div>
                 ) : (
-                    <LaudoPreview data={formData} engenheiro={currentEngenheiro} mapSnapshot={manualMapImage || mapSnapshot} />
+                    <LaudoPreview data={formData} engenheiro={currentEngenheiro} mapSnapshot={mapSnapshot} />
                 )}
              </div>
           </div>

@@ -22,7 +22,7 @@ export interface LaudoData {
   
   // Campos Urbanos
   indicacaoFiscal: string;
-  inscricaoImobiliaria: string;
+  inscricaoMunicipal: string;
   matricula: string;
 
   // Campos Rurais
