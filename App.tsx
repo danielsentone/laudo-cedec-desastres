@@ -6,16 +6,11 @@ import EngenheiroModal from './components/EngenheiroModal';
 import LaudoPreview from './components/LaudoPreview';
 import { LOGO_DEFESA_CIVIL_BASE64, PIN_MARKER_BASE64, LOGO_PARANA_BASE64 } from './assets';
 
-declare global {
-  interface Window {
-    html2pdf: any;
-    html2canvas: any;
-    L: any;
-  }
-}
-
+// @ts-ignore
 const html2pdf = window.html2pdf;
+// @ts-ignore
 const html2canvas = window.html2canvas;
+// @ts-ignore
 const L = window.L;
 
 const App: React.FC = () => {
@@ -487,24 +482,19 @@ const App: React.FC = () => {
 
         if (!isNaN(lat) && !isNaN(lng)) {
             setIsGeneratingMap(true);
-            const staticMap = await fetchStaticMap(lat, lng);
-            if (staticMap) {
-                setMapSnapshot(staticMap);
-            } else {
-                // Tenta gerar snapshot do mapa apenas para visualização
-                // O html2canvas pode falhar em alguns contextos, então tratamos como opcional
-                try {
-                    const mapElement = document.getElementById('map-container');
-                    if (mapElement && window.html2canvas) {
-                        const canvas = await window.html2canvas(mapElement, {
-                            useCORS: true, allowTaint: false, logging: false, scale: 1,
-                            ignoreElements: (element: any) => element.classList.contains('leaflet-control-zoom')
-                        });
-                        setMapSnapshot(canvas.toDataURL('image/png'));
-                    }
-                } catch (e) { console.error("Erro ao gerar snapshot local do mapa:", e); }
+            try {
+                const staticMap = await fetchStaticMap(lat, lng);
+                if (staticMap) {
+                    setMapSnapshot(staticMap);
+                } else {
+                    setMapSnapshot(null);
+                }
+            } catch(e) {
+                console.error("Erro ao gerar mapa", e);
+                setMapSnapshot(null);
+            } finally {
+                setIsGeneratingMap(false);
             }
-            setIsGeneratingMap(false);
         } else {
             setMapSnapshot(null);
         }
@@ -513,73 +503,64 @@ const App: React.FC = () => {
   };
 
   const generatePDF = async () => {
-    // Busca os elementos DEDICADOS para impressão (não os da tela)
-    const headerEl = document.getElementById('print-header-template');
-    const footerEl = document.getElementById('print-footer-template');
-    const contentEl = document.getElementById('print-content-body');
+    const headerEl = document.getElementById('pdf-header-template');
+    const footerEl = document.getElementById('pdf-footer-template');
+    const contentEl = document.getElementById('laudo-content-body');
     
-    // Verificação robusta
     if (!headerEl || !footerEl || !contentEl) {
-        alert("Erro crítico: Elementos de impressão não encontrados.");
-        return;
-    }
-    
-    // Verifica se html2canvas está carregado corretamente
-    if (!window.html2canvas) {
-        alert("Erro: Biblioteca de geração de imagem não carregada. Recarregue a página.");
+        alert("Erro ao gerar PDF: Elementos de template não encontrados.");
         return;
     }
 
     try {
-        setIsGeneratingMap(true); // Reutiliza este estado para indicar loading
+        setIsGeneratingMap(true);
 
-        // Pequeno delay para garantir renderização no DOM
-        await new Promise(r => setTimeout(r, 500));
+        const a4WidthPx = 794; // Largura aproximada A4 em px (96dpi)
 
-        // 1. Captura os templates com configurações robustas para mobile
-        // windowWidth: 1024 é CRUCIAL para que o mobile renderize como desktop e não quebre o layout
-        const canvasOptions = {
+        const headerCanvas = await html2canvas(headerEl, { 
             scale: 2, 
             useCORS: true, 
             backgroundColor: '#ffffff',
-            width: 794, // Largura A4 a 96dpi
-            windowWidth: 1200 // Simula desktop para evitar layouts mobile quebrados
-        };
-
-        const headerCanvas = await window.html2canvas(headerEl, canvasOptions);
+            windowWidth: a4WidthPx
+        });
         const headerImg = headerCanvas.toDataURL('image/png');
         
-        const footerCanvas = await window.html2canvas(footerEl, canvasOptions);
+        const footerCanvas = await html2canvas(footerEl, { 
+            scale: 2, 
+            useCORS: true, 
+            backgroundColor: '#ffffff',
+            windowWidth: a4WidthPx
+        });
         const footerImg = footerCanvas.toDataURL('image/png');
 
-        // 2. Configuração do PDF
+        // Margens aumentadas para 45mm no topo para evitar corte do cabeçalho
         const opt = {
-          margin: [40, 10, 30, 10], 
+          margin: [45, 10, 30, 10], 
           filename: `Laudo_${formData.municipio || 'PR'}_${formData.data}.pdf`,
-          image: { type: 'jpeg', quality: 0.95 },
-          html2canvas: { ...canvasOptions, scrollY: 0 }, 
+          image: { type: 'jpeg', quality: 0.98 },
+          html2canvas: { scale: 2, useCORS: true, scrollY: 0, letterRendering: true },
           jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
           pagebreak: { mode: ['css', 'legacy'] } 
         };
 
-        // 3. Geração usando html2pdf (promessa)
-        await html2pdf().from(contentEl).set(opt).toPdf().get('pdf').then((pdf: any) => {
+        html2pdf().from(contentEl).set(opt).toPdf().get('pdf').then((pdf: any) => {
             const totalPages = pdf.internal.getNumberOfPages();
             const pageWidth = pdf.internal.pageSize.getWidth();
             const pageHeight = pdf.internal.pageSize.getHeight();
             
             for (let i = 1; i <= totalPages; i++) {
                 pdf.setPage(i);
-                pdf.addImage(headerImg, 'PNG', 0, 0, pageWidth, 40);
+                pdf.addImage(headerImg, 'PNG', 0, 0, pageWidth, 35);
                 pdf.addImage(footerImg, 'PNG', 0, pageHeight - 25, pageWidth, 25);
             }
-        }).save();
+        }).save().then(() => {
+             setIsGeneratingMap(false);
+        });
 
     } catch (e) {
         console.error("Erro na geração do PDF:", e);
-        alert("Erro ao gerar o PDF. Se estiver no celular, tente usar um computador ou outro navegador.");
-    } finally {
         setIsGeneratingMap(false);
+        alert("Erro ao gerar o PDF. Tente novamente.");
     }
   };
 
@@ -603,61 +584,34 @@ const App: React.FC = () => {
   return (
     <div className="bg-[#f2f2f2] min-h-screen font-sans">
       
-      {/* --- CONTAINER DE IMPRESSÃO DEDICADO --- 
-          Este container existe sempre no DOM mas fora da tela.
-          Usamos position fixed e left muito negativo. 
-          NÃO usar display: none nem z-index negativo com posição relativa, pois html2canvas pode ignorar.
-      */}
-      <div 
-        id="print-container-root" 
-        style={{ 
-            position: 'fixed', 
-            top: 0, 
-            left: '-10000px', // Fora da tela, mas renderizado
-            width: '794px', // Largura fixa A4
-            height: 'auto',
-            pointerEvents: 'none',
-            overflow: 'visible',
-            background: 'white'
-        }}
-      >
-         {/* 1. Header Template para Captura */}
-         <div id="print-header-template" style={{ width: '794px', height: '150px' }} className="bg-white flex items-center justify-center relative">
-            <div className="absolute left-8 top-1/2 transform -translate-y-1/2">
-                 <img src={LOGO_PARANA_BASE64} alt="Brasão PR" style={{ height: '90px', width: 'auto' }} />
-            </div>
-            <div className="text-center w-full pl-32 pr-8">
-                <h2 className="font-black text-2xl uppercase text-black leading-none mb-1">Estado do Paraná</h2>
-                <h3 className="font-black text-xl uppercase text-black leading-none mb-1">Coordenadoria Estadual da Defesa Civil</h3>
-                <p className="font-bold text-sm uppercase text-black leading-none">Fundo Estadual para Calamidades Públicas</p>
+      {/* --- TEMPLATES OCULTOS PARA GERAÇÃO DE PDF --- */}
+      {/* Posicionados com top:0, left:0 e zIndex negativo para renderização correta sem interferir no layout visual */}
+      <div style={{ position: 'fixed', top: 0, left: 0, zIndex: -50, width: '210mm', pointerEvents: 'none', visibility: 'visible' }}>
+         
+         {/* Template Cabeçalho */}
+         <div id="pdf-header-template" className="bg-white px-8 pt-6 pb-2 w-full relative flex items-center justify-center h-[35mm] text-black">
+            <div className="text-center w-full">
+                <h2 className="font-black text-2xl uppercase text-black leading-none mb-1" style={{color: '#000000'}}>Estado do Paraná</h2>
+                <h3 className="font-black text-xl uppercase text-black leading-none mb-1" style={{color: '#000000'}}>Coordenadoria Estadual da Defesa Civil</h3>
+                <p className="font-bold text-sm uppercase text-black leading-none" style={{color: '#000000'}}>Fundo Estadual para Calamidades Públicas</p>
             </div>
          </div>
 
-         {/* 2. Footer Template para Captura */}
-         <div id="print-footer-template" style={{ width: '794px', height: '100px' }} className="bg-white flex flex-col justify-end pb-2">
+         {/* Template Rodapé */}
+         <div id="pdf-footer-template" className="bg-white w-full relative h-[25mm] flex flex-col justify-end pb-2 text-black">
              <div className="w-full h-2 flex mb-2">
                  <div className="bg-[#0038a8] w-[85%] h-full" style={{ clipPath: 'polygon(0 0, 100% 0, 98% 100%, 0% 100%)' }}></div>
                  <div className="bg-[#009943] w-[15%] h-full ml-[-10px]" style={{ clipPath: 'polygon(20% 0, 100% 0, 100% 100%, 0% 100%)' }}></div>
              </div>
-             <div className="text-center text-[10px] text-black font-bold px-8">
+             <div className="text-center text-[9px] text-black font-bold px-8" style={{color: '#000000'}}>
                 <p className="leading-tight">Palácio das Araucárias - 1º andar - Setor C | Centro Cívico | Curitiba/PR | CEP 80.530-140</p>
                 <p className="leading-tight">E-mail: defesacivil@defesacivil.pr.gov.br | Fone: (41) 3281-2500</p>
-                <p className="mt-1 font-black italic text-black text-[11px]">"Defesa Civil somos todos nós"</p>
+                <p className="mt-1 font-black italic text-black text-[10px]" style={{color: '#000000'}}>"Defesa Civil somos todos nós"</p>
              </div>
          </div>
 
-         {/* 3. Corpo do Laudo para Captura */}
-         <div id="print-content-body">
-             <LaudoPreview 
-                data={formData} 
-                engenheiro={currentEngenheiro} 
-                mapSnapshot={mapSnapshot} 
-                isPrintMode={true} // Prop nova para controlar renderização
-             />
-         </div>
-
       </div>
-      {/* --- FIM CONTAINER IMPRESSÃO --- */}
+      {/* --- FIM TEMPLATES --- */}
 
       <div className="sticky top-0 z-30">
         <div className="bg-[#1e1e1e] text-white py-1 px-4 flex justify-between items-center text-xs">
@@ -684,10 +638,10 @@ const App: React.FC = () => {
       </div>
 
       <main className="max-w-5xl mx-auto py-8 px-4">
-        {/* Formulário Principal */}
+        {/* Formulário Principal (Mantido igual) */}
         <div className="bg-white rounded-lg shadow-xl overflow-hidden border border-gray-200">
           <div className="p-6 md:p-10 space-y-10">
-            
+            {/* ... Conteúdo do Formulário ... */}
             {/* Seção 1 */}
             <section className="space-y-6">
               <div className="flex items-center gap-3 border-b border-gray-100 pb-2">
@@ -742,7 +696,7 @@ const App: React.FC = () => {
                     </button>
                 </div>
               </div>
-
+              {/* Campos do formulário */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-end">
                 {formData.zona === 'Urbano' ? (
                     <>
@@ -811,6 +765,7 @@ const App: React.FC = () => {
                 </div>
               </div>
 
+              {/* ... Resto do componente (Mapas, Danos, Classificação) ... */}
               <div className="space-y-4 pt-4 border-t border-gray-100">
                 <div className="flex justify-between items-end flex-wrap gap-2">
                     <label className="block text-xs font-bold text-gray-500 uppercase">Endereço</label>
